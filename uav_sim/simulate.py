@@ -26,7 +26,7 @@ def run(duration=20.0, dt=0.005, trajectory="circle", state0=None, motor_bandwid
         ref_fn = ref_lib.hover(z=1.0)
 
     n_steps = int(duration / dt)
-    log = {"t": [], "pos": [], "ref": [], "err": []}
+    log = {"t": [], "pos": [], "att": [], "ref": [], "err": []}
 
     t = 0.0
     for _ in range(n_steps):
@@ -38,11 +38,12 @@ def run(duration=20.0, dt=0.005, trajectory="circle", state0=None, motor_bandwid
 
         log["t"].append(t)
         log["pos"].append(dynamics.position.copy())
+        log["att"].append(dynamics.attitude.copy())
         log["ref"].append(r.copy())
         log["err"].append(e.copy())
         t += dt
 
-    for k in ("pos", "ref", "err"):
+    for k in ("pos", "att", "ref", "err"):
         log[k] = np.array(log[k])
     log["t"] = np.array(log["t"])
     return log
