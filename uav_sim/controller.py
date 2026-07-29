@@ -61,11 +61,24 @@ class LoopGains:
 #                  ~131 ms of tolerable unmodeled delay -- an order of
 #                  magnitude more robustness margin, at a real cost in
 #                  tracking accuracy.
+#   "hand_tuned"   same Z/attitude/yaw as margin_safe (already pass), but the
+#                  outer x/y loop gains are hand-picked (outer_kp/ki/kd below)
+#                  instead of coming from the wn_xy/zeta_xy formula -- exactly
+#                  what the reference report did for this exact loop, after
+#                  finding the formula "cumbersome" there. A grid search over
+#                  kp/ki/kd found the integral term is what was destroying the
+#                  outer loop's margin (every passing combination had ki~0);
+#                  kp=0.3, ki=0.02, kd=0.8 clears both targets by a wide
+#                  margin (GM=18.7 dB, PM=64.4 deg) while keeping a little
+#                  integral action for drift rejection.
 GAIN_PRESETS = {
     "aggressive": dict(wn_z=3.0, zeta_z=1.0, wn_xy=2.2, zeta_xy=0.9,
                         wn_attitude=13.0, zeta_attitude=1.3, wn_yaw=6.0, zeta_yaw=1.2),
     "margin_safe": dict(wn_z=3.0, zeta_z=1.0, wn_xy=0.5, zeta_xy=0.9,
                          wn_attitude=3.0, zeta_attitude=1.2, wn_yaw=3.0, zeta_yaw=1.2),
+    "hand_tuned": dict(wn_z=3.0, zeta_z=1.0, wn_xy=0.5, zeta_xy=0.9,
+                        wn_attitude=3.0, zeta_attitude=1.2, wn_yaw=3.0, zeta_yaw=1.2,
+                        outer_gains=dict(kp=0.3, ki=0.02, kd=0.8)),
 }
 
 
@@ -85,7 +98,7 @@ class CascadedPIDController:
                  wn_xy=2.2, zeta_xy=0.9,
                  wn_attitude=13.0, zeta_attitude=1.3,
                  wn_yaw=6.0, zeta_yaw=1.2,
-                 i_limit=2.0):
+                 i_limit=2.0, outer_gains=None):
         self.p = params if params is not None else CrazyflieParams()
 
         # Z: PD only (no integral) -- thrust's gravity feedforward already
@@ -94,8 +107,17 @@ class CascadedPIDController:
 
         # Outer position loops: PID, acceleration domain (no /g here --
         # the /g happens explicitly in the small-angle inversion below).
-        self.g_x = LoopGains(wn_xy, zeta_xy, ki=True)
-        self.g_y = LoopGains(wn_xy, zeta_xy, ki=True)
+        # outer_gains, if given, bypasses the wn_xy/zeta_xy formula entirely
+        # with directly hand-picked {kp, ki, kd} -- mirrors the reference
+        # report abandoning the formula for this specific loop.
+        if outer_gains is not None:
+            self.g_x = LoopGains.__new__(LoopGains)
+            self.g_x.kp, self.g_x.ki, self.g_x.kd = outer_gains["kp"], outer_gains["ki"], outer_gains["kd"]
+            self.g_y = LoopGains.__new__(LoopGains)
+            self.g_y.kp, self.g_y.ki, self.g_y.kd = outer_gains["kp"], outer_gains["ki"], outer_gains["kd"]
+        else:
+            self.g_x = LoopGains(wn_xy, zeta_xy, ki=True)
+            self.g_y = LoopGains(wn_xy, zeta_xy, ki=True)
         self.int_x = Integrator(limit=i_limit)
         self.int_y = Integrator(limit=i_limit)
 
