@@ -1,4 +1,8 @@
+from pathlib import Path
+
 import matplotlib.pyplot as plt
+
+PLOTS_DIR = Path(__file__).resolve().parent.parent / "outputs" / "plots"
 
 
 def plot_results(log):
@@ -37,5 +41,6 @@ def plot_results(log):
     ax4.set_title("Position error norm")
 
     plt.tight_layout()
-    plt.savefig("simulation_result.png", dpi=150)
-    print("Saved plot to simulation_result.png")
+    out_path = PLOTS_DIR / "simulation_result.png"
+    plt.savefig(out_path, dpi=150)
+    print(f"Saved plot to {out_path}")

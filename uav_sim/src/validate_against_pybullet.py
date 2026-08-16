@@ -16,8 +16,12 @@ gym_pybullet_drones/assets/cf2x.urdf's mass corrected from 0.027 to 0.029 kg
 to match the Bitcraze datasheet value used in dynamics.py.CrazyflieParams).
 """
 
+from pathlib import Path
+
 import numpy as np
 from dynamics import QuadrotorDynamics, CrazyflieParams, G
+
+PLOTS_DIR = Path(__file__).resolve().parent.parent / "outputs" / "plots"
 
 from gym_pybullet_drones.envs.CtrlAviary import CtrlAviary
 from gym_pybullet_drones.utils.enums import DroneModel, Physics
@@ -120,7 +124,9 @@ def test_roll_coupling(duration=0.3, delta_frac=0.002):
     return t, (pb_phi, pb_vy, pb_y), (ours_phi, ours_vy, ours_y)
 
 
-def plot(t1, pb_z, ours_z, t2, pb_data, ours_data, filename="pybullet_validation.png"):
+def plot(t1, pb_z, ours_z, t2, pb_data, ours_data, filename=None):
+    if filename is None:
+        filename = PLOTS_DIR / "pybullet_validation.png"
     import matplotlib.pyplot as plt
     pb_phi, pb_vy, pb_y = pb_data
     ours_phi, ours_vy, ours_y = ours_data

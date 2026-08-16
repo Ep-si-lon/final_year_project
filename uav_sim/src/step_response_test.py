@@ -8,11 +8,15 @@ holds here too, and whether the margin_safe preset (Section 6 analysis)
 drifts less than the aggressive one.
 """
 
+from pathlib import Path
+
 import numpy as np
 from dynamics import QuadrotorDynamics, CrazyflieParams
 from controller import CascadedPIDController, GAIN_PRESETS
 from actuator import MotorLag
 import reference as ref_lib
+
+PLOTS_DIR = Path(__file__).resolve().parent.parent / "outputs" / "plots"
 
 
 # Same initial-attitude disturbance as the reference report's Listing 4:
@@ -49,7 +53,9 @@ def run_step(gain_preset="aggressive", duration=10.0, dt=0.002, step_z=0.5):
     return log
 
 
-def plot(logs, filename="step_response.png"):
+def plot(logs, filename=None):
+    if filename is None:
+        filename = PLOTS_DIR / "step_response.png"
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))

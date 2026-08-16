@@ -10,9 +10,14 @@ Produces:
 """
 
 import shutil
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
+
+ANIMATIONS_DIR = Path(__file__).resolve().parent.parent / "outputs" / "animations"
+FILMSTRIPS_DIR = Path(__file__).resolve().parent.parent / "outputs" / "filmstrips"
 
 
 def rotation_matrix(phi, theta, psi):
@@ -65,7 +70,7 @@ def animate_flight(log, filename=None, fps=30, playback_speed=4.0, arm_len=0.18)
 
     has_ffmpeg = shutil.which("ffmpeg") is not None
     if filename is None:
-        filename = "flight_animation.mp4" if has_ffmpeg else "flight_animation.gif"
+        filename = ANIMATIONS_DIR / ("flight_animation.mp4" if has_ffmpeg else "flight_animation.gif")
 
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot(111, projection="3d")
@@ -101,7 +106,9 @@ def animate_flight(log, filename=None, fps=30, playback_speed=4.0, arm_len=0.18)
     return filename
 
 
-def filmstrip(log, n_frames=6, filename="flight_filmstrip.png", arm_len=0.18):
+def filmstrip(log, n_frames=6, filename=None, arm_len=0.18):
+    if filename is None:
+        filename = FILMSTRIPS_DIR / "flight_filmstrip.png"
     t, pos, att, ref = log["t"], log["pos"], log["att"], log["ref"]
     frame_idx = np.linspace(0, len(t) - 1, n_frames).astype(int)
 
