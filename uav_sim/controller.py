@@ -71,6 +71,18 @@ class LoopGains:
 #                  kp=0.3, ki=0.02, kd=0.8 clears both targets by a wide
 #                  margin (GM=18.7 dB, PM=64.4 deg) while keeping a little
 #                  integral action for drift rejection.
+#   "reference_replica"  a literal copy of the report's own Listing 2/3 numbers
+#                  -- not our formula-derived gains, THEIR five hand-picked
+#                  values per cascaded axis (wn_inner, zeta_inner, kp_outer,
+#                  ki_outer, kd_outer), including their asymmetric roll vs.
+#                  pitch inner loop (zeta_roll=1.2 vs zeta_pitch=1.5, a
+#                  discrepancy in the report itself despite its text claiming
+#                  "the same bandwidth and damping" for both) and their
+#                  outer-loop derivative low-pass filter (N=10), which their
+#                  report says was "necessary due to instability from
+#                  amplifying errors" when differentiating a noisy position
+#                  error. Use this preset as the fidelity baseline; build
+#                  improvements (like margin_safe/hand_tuned) on top of it.
 GAIN_PRESETS = {
     "aggressive": dict(wn_z=3.0, zeta_z=1.0, wn_xy=2.2, zeta_xy=0.9,
                         wn_attitude=13.0, zeta_attitude=1.3, wn_yaw=6.0, zeta_yaw=1.2),
@@ -79,6 +91,14 @@ GAIN_PRESETS = {
     "hand_tuned": dict(wn_z=3.0, zeta_z=1.0, wn_xy=0.5, zeta_xy=0.9,
                         wn_attitude=3.0, zeta_attitude=1.2, wn_yaw=3.0, zeta_yaw=1.2,
                         outer_gains=dict(kp=0.3, ki=0.02, kd=0.8)),
+    "reference_replica": dict(
+        wn_z=3.0, zeta_z=1.0,
+        wn_phi=3.0, zeta_phi=1.2,       # L (roll) inner loop, Sec 6.2
+        wn_theta=3.0, zeta_theta=1.5,   # M (pitch) inner loop, Sec 6.3
+        wn_yaw=2.5, zeta_yaw=1.2,       # N (yaw), Sec 6.4
+        outer_gains=dict(kp=0.2, ki=0.1, kd=0.1),  # kpx=kpy, kix=kiy, kdx=kdy, Listing 2
+        deriv_filter_N=10.0,            # Listing 2's "N_filter = 10" derivative low-pass
+    ),
 }
 
 
@@ -97,9 +117,28 @@ class CascadedPIDController:
                  wn_z=3.0, zeta_z=1.0,
                  wn_xy=2.2, zeta_xy=0.9,
                  wn_attitude=13.0, zeta_attitude=1.3,
+                 wn_phi=None, zeta_phi=None, wn_theta=None, zeta_theta=None,
                  wn_yaw=6.0, zeta_yaw=1.2,
-                 i_limit=2.0, outer_gains=None):
+                 i_limit=2.0, outer_gains=None, deriv_filter_N=None):
         self.p = params if params is not None else CrazyflieParams()
+
+        # wn_phi/zeta_phi (roll) and wn_theta/zeta_theta (pitch) override
+        # wn_attitude/zeta_attitude independently, for presets (like the
+        # reference report) that tune the two inner loops asymmetrically.
+        wn_phi = wn_attitude if wn_phi is None else wn_phi
+        zeta_phi = zeta_attitude if zeta_phi is None else zeta_phi
+        wn_theta = wn_attitude if wn_theta is None else wn_theta
+        zeta_theta = zeta_attitude if zeta_theta is None else zeta_theta
+
+        # Derivative low-pass filter (report Listing 2's "N_filter"), applied
+        # to the outer x/y velocity-feedback term. Off by default -- this
+        # project reads true velocity state rather than differentiating a
+        # noisy position error, so there's normally no derivative kick to
+        # filter away; the reference_replica preset turns it on to match
+        # the report's Sec 6.2/6.3 outer-loop transfer functions exactly.
+        self.deriv_filter_N = deriv_filter_N
+        self.filt_evx = 0.0
+        self.filt_evy = 0.0
 
         # Z: PD only (no integral) -- thrust's gravity feedforward already
         # removes the steady-state bias an integral term would otherwise fix.
@@ -122,8 +161,8 @@ class CascadedPIDController:
         self.int_y = Integrator(limit=i_limit)
 
         # Inner attitude loops: PD, torque domain, scaled by inertia.
-        self.g_phi = LoopGains(wn_attitude, zeta_attitude, scale=self.p.Ixx)
-        self.g_theta = LoopGains(wn_attitude, zeta_attitude, scale=self.p.Iyy)
+        self.g_phi = LoopGains(wn_phi, zeta_phi, scale=self.p.Ixx)
+        self.g_theta = LoopGains(wn_theta, zeta_theta, scale=self.p.Iyy)
 
         # Yaw: PD only, torque domain.
         self.g_psi = LoopGains(wn_yaw, zeta_yaw, scale=self.p.Izz)
@@ -157,8 +196,16 @@ class CascadedPIDController:
         # ---- Outer X/Y: PID + feedforward, direct velocity feedback ----
         ix = self.int_x.step(e_pos[0], dt)
         iy = self.int_y.step(e_pos[1], dt)
-        ax_cmd = ref_acc[0] + self.g_x.kp * e_pos[0] + self.g_x.ki * ix + self.g_x.kd * e_vel[0]
-        ay_cmd = ref_acc[1] + self.g_y.kp * e_pos[1] + self.g_y.ki * iy + self.g_y.kd * e_vel[1]
+
+        e_vel_x, e_vel_y = e_vel[0], e_vel[1]
+        if self.deriv_filter_N is not None:
+            alpha = self.deriv_filter_N * dt / (1 + self.deriv_filter_N * dt)
+            self.filt_evx = (1 - alpha) * self.filt_evx + alpha * e_vel_x
+            self.filt_evy = (1 - alpha) * self.filt_evy + alpha * e_vel_y
+            e_vel_x, e_vel_y = self.filt_evx, self.filt_evy
+
+        ax_cmd = ref_acc[0] + self.g_x.kp * e_pos[0] + self.g_x.ki * ix + self.g_x.kd * e_vel_x
+        ay_cmd = ref_acc[1] + self.g_y.kp * e_pos[1] + self.g_y.ki * iy + self.g_y.kd * e_vel_y
 
         # small-angle inversion: desired horizontal accel -> desired tilt
         phi_des = np.clip(

@@ -3,22 +3,30 @@ Section 6 of the WashU ESE4481 report (Bode/Nyquist gain & phase margins),
 built from THIS project's actual gains and motor-lag model rather than
 copying their numbers.
 
-Unlike the report, our outer-loop transfer functions have no derivative
-low-pass filter term (their "1/(1+s/N)") -- we feed back the true velocity
-state directly instead of differentiating a noisy discrete position error,
-so there's no derivative-kick/noise problem to filter away.
+Our own presets (aggressive/margin_safe/hand_tuned) have no derivative
+low-pass filter term (their "1/(1+s/N)") in the outer-loop transfer
+functions -- we feed back the true velocity state directly instead of
+differentiating a noisy discrete position error, so there's normally no
+derivative-kick/noise problem to filter away. The "reference_replica" preset
+is the exception: it turns the filter on (deriv_filter_N=10) and this module
+includes the "1/(1+s/N)" term for it, to reproduce the report's own outer-loop
+transfer functions (Eq. 16/18) and check against its reported margins:
+roll (y) outer 7.33 dB / 53.3 deg, pitch (x) outer 6.76 dB / 56.3 deg.
 
 Target (same as the reference report): gain margin > 6 dB, phase margin > 45 deg.
 
-Two presets are checked (GAIN_PRESETS in controller.py): "aggressive" (best
-tracking, fails several margin checks) and "margin_safe" (passes Z/phi/theta/
-psi cleanly). Both presets still show a weak outer x/y-position gain margin
-(~-5 dB) -- this matches the reference report's own experience: their outer
-position-loop gains were, in their words, "cumbersome" to derive from the
-wn/zeta formula and were hand-tuned instead, and their discussion section
-recommends LQR as a better fit for that loop specifically. We report this as
-a known, expected limitation of the PID/PD architecture rather than chase it
-further -- an LQR outer loop is a natural next improvement, not a bug fix.
+Presets checked (GAIN_PRESETS in controller.py): "aggressive" (best tracking,
+fails several margin checks), "margin_safe" (passes Z/phi/theta/psi cleanly),
+"hand_tuned", and "reference_replica" (a literal copy of the report's own
+numbers, for validating this simulator against their published results).
+Non-replica presets still show a weak outer x/y-position gain margin
+(~-5 dB) in some cases -- this matches the reference report's own experience:
+their outer position-loop gains were, in their words, "cumbersome" to derive
+from the wn/zeta formula and were hand-tuned instead, and their discussion
+section recommends LQR as a better fit for that loop specifically. We report
+this as a known, expected limitation of the PID/PD architecture rather than
+chase it further -- an LQR outer loop is a natural next improvement, not a
+bug fix.
 """
 
 import control
@@ -60,6 +68,15 @@ def build_loops(gain_preset="aggressive"):
 
     C_x = (ctrl.g_x.kd * s ** 2 + ctrl.g_x.kp * s + ctrl.g_x.ki) / s
     C_y = (ctrl.g_y.kd * s ** 2 + ctrl.g_y.kp * s + ctrl.g_y.ki) / s
+
+    # reference_replica turns on the report's outer-loop derivative low-pass
+    # filter (Listing 2's N_filter=10, Eq. 16/18's "1/(1+s/N)" term) -- match
+    # it here too, so the transfer function mirrors what controller.py
+    # actually computes for this preset.
+    if ctrl.deriv_filter_N is not None:
+        N = ctrl.deriv_filter_N
+        C_x = (ctrl.g_x.kd * s ** 2 + ctrl.g_x.kp * s + ctrl.g_x.ki) / (s * (1 + s / N))
+        C_y = (ctrl.g_y.kd * s ** 2 + ctrl.g_y.kp * s + ctrl.g_y.ki) / (s * (1 + s / N))
 
     # roll (phi) drives y; pitch (theta) drives x -- matches controller.py's
     # small-angle inversion (phi <-> y, theta <-> x). Note: no extra factor
