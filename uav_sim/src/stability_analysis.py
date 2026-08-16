@@ -42,12 +42,19 @@ PM_TARGET_DEG = 45.0
 def build_loops(gain_preset="aggressive"):
     params = CrazyflieParams()
     ctrl = CascadedPIDController(params, **GAIN_PRESETS[gain_preset])
+    return build_loops_from_controller(ctrl)
+
+
+def build_loops_from_controller(ctrl):
+    """Same construction as build_loops, but from an already-built controller
+    instance rather than a named preset -- lets pso_tune.py evaluate
+    candidate gain vectors without registering a GAIN_PRESETS entry first."""
     motor_bw = MotorLag().omega  # 10 rad/s, matches the reference report's H(s)
 
     s = control.tf("s")
     H_motor = motor_bw / (s + motor_bw)
 
-    Jxx, Jyy, Jzz = params.Ixx, params.Iyy, params.Izz
+    Jxx, Jyy, Jzz = ctrl.p.Ixx, ctrl.p.Iyy, ctrl.p.Izz
 
     # Z: controller.py's g_z gains are ACCELERATION-domain (scale=1 -- the
     # /mass conversion happens explicitly in F=mass*(G+az_cmd)/cos(..)), and

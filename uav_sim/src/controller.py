@@ -99,6 +99,24 @@ GAIN_PRESETS = {
         outer_gains=dict(kp=0.2, ki=0.1, kd=0.1),  # kpx=kpy, kix=kiy, kdx=kdy, Listing 2
         deriv_filter_N=10.0,            # Listing 2's "N_filter = 10" derivative low-pass
     ),
+    # PSO-optimized (pso_tune.py), Z/yaw held at margin_safe's values in all
+    # three -- only the loops actually in question (inner roll/pitch, outer
+    # x/y) were searched. All three independently converged to ki_outer~=0,
+    # confirming hand_tuned's grid-search finding that integral action is
+    # what destroys this loop's margin. Several best values sit exactly on a
+    # search bound (kd_outer=2.0 here, kp_outer=1.0 in pso_5var_raw,
+    # zeta_inner=2.0 in pso_5var_formula) -- these are the best PSO found
+    # within the bounds searched, not necessarily a true unconstrained optimum.
+    "pso_3var": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
+                      wn_attitude=3.0, zeta_attitude=1.2,
+                      outer_gains=dict(kp=0.9124758772940267, ki=0.0, kd=2.0)),
+    "pso_5var_formula": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
+                              wn_attitude=2.772591296019356, zeta_attitude=2.0,
+                              outer_gains=dict(kp=0.404428459350719, ki=0.009966483625753524,
+                                                kd=1.542711618942076)),
+    "pso_5var_raw": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
+                          inner_gains=dict(kp=0.00012334409476751009, kd=7.406661793004076e-05),
+                          outer_gains=dict(kp=1.0, ki=0.0, kd=1.7316026182531068)),
 }
 
 
@@ -119,7 +137,7 @@ class CascadedPIDController:
                  wn_attitude=13.0, zeta_attitude=1.3,
                  wn_phi=None, zeta_phi=None, wn_theta=None, zeta_theta=None,
                  wn_yaw=6.0, zeta_yaw=1.2,
-                 i_limit=2.0, outer_gains=None, deriv_filter_N=None):
+                 i_limit=2.0, outer_gains=None, deriv_filter_N=None, inner_gains=None):
         self.p = params if params is not None else CrazyflieParams()
 
         # wn_phi/zeta_phi (roll) and wn_theta/zeta_theta (pitch) override
@@ -161,8 +179,18 @@ class CascadedPIDController:
         self.int_y = Integrator(limit=i_limit)
 
         # Inner attitude loops: PD, torque domain, scaled by inertia.
-        self.g_phi = LoopGains(wn_phi, zeta_phi, scale=self.p.Ixx)
-        self.g_theta = LoopGains(wn_theta, zeta_theta, scale=self.p.Iyy)
+        # inner_gains, if given, bypasses the wn_phi/zeta_phi (and
+        # wn_theta/zeta_theta) formula entirely with directly hand-picked
+        # {kp, kd} applied symmetrically to both roll and pitch -- used by
+        # pso_tune.py's raw-gain search variant.
+        if inner_gains is not None:
+            self.g_phi = LoopGains.__new__(LoopGains)
+            self.g_phi.kp, self.g_phi.kd, self.g_phi.ki = inner_gains["kp"], inner_gains["kd"], 0.0
+            self.g_theta = LoopGains.__new__(LoopGains)
+            self.g_theta.kp, self.g_theta.kd, self.g_theta.ki = inner_gains["kp"], inner_gains["kd"], 0.0
+        else:
+            self.g_phi = LoopGains(wn_phi, zeta_phi, scale=self.p.Ixx)
+            self.g_theta = LoopGains(wn_theta, zeta_theta, scale=self.p.Iyy)
 
         # Yaw: PD only, torque domain.
         self.g_psi = LoopGains(wn_yaw, zeta_yaw, scale=self.p.Izz)

@@ -11,13 +11,18 @@ import reference as ref_lib
 
 
 def run(duration=20.0, dt=0.005, trajectory="circle", state0=None, motor_bandwidth=10.0,
-        gain_preset="aggressive"):
+        gain_preset="aggressive", controller_kwargs=None):
+    """gain_preset picks a named entry from GAIN_PRESETS; pass gain_preset=None
+    with controller_kwargs to build a CascadedPIDController directly from
+    arbitrary kwargs instead (e.g. for a PSO candidate not registered as a
+    preset -- see pso_tune.py)."""
     params = CrazyflieParams()
     if state0 is None:
         state0 = np.zeros(12)  # start at rest on the ground, level attitude
 
     dynamics = QuadrotorDynamics(params, state0)
-    controller = CascadedPIDController(params, **GAIN_PRESETS[gain_preset])
+    gains = controller_kwargs if gain_preset is None else GAIN_PRESETS[gain_preset]
+    controller = CascadedPIDController(params, **gains)
     actuator = MotorLag(omega=motor_bandwidth, u0=[params.mass * 9.81, 0.0, 0.0, 0.0])
 
     if trajectory == "circle":
