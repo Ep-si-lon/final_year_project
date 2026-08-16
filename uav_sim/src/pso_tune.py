@@ -25,9 +25,15 @@ report). Particles that fail get a penalty proportional to how badly they
 fail -- steep enough that PSO reliably moves out of the infeasible region,
 but still smooth (no simulation run at all for these, since a doomed
 particle's time-domain error isn't informative). Particles that pass get
-simulated (short circle-tracking run) and scored by steady-state tracking
-error -- this is the real number that distinguishes stable presets from
-each other (0.14m hand_tuned vs 0.20m margin_safe, etc).
+simulated (full circle-tracking run) and scored by ITAE (integral of
+time-weighted absolute error) over the WHOLE run, not just a late
+steady-state window -- see _tracking_error's docstring for why: a
+last-N-seconds-mean fitness previously let PSO trade settling speed for a
+marginally smaller final error (one run settled in ~70s instead of ~10s
+for a ~2x tighter final number), because it had no visibility into, or
+penalty for, how long the transient took. ITAE punishes error that lingers
+late into the run much more than the same error early on, directly
+penalizing slow settling and lightly-damped/ringing responses.
 """
 
 import numpy as np
@@ -46,8 +52,7 @@ FIXED_ZETA_ATTITUDE = 1.2
 # (and, in the 5-var searches, the inner roll/pitch loop that feeds it).
 FIXED_KWARGS = dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2)
 
-SIM_DURATION = 15.0   # short circle-tracking run, seconds
-SIM_STEADY_WINDOW = 5.0  # score = mean error over the last N seconds
+SIM_DURATION = 100.0     # circle-tracking run, seconds, per particle evaluation
 
 PENALTY_BASE = 1000.0
 
@@ -76,10 +81,30 @@ def _check_margins(ctrl, loop_names):
 
 
 def _tracking_error(ctrl_kwargs):
+    """ITAE (Integral of Time-weighted Absolute Error) over the FULL run,
+    not just a late steady-state window. Weighting error by time t means an
+    error that's still present late in the run costs far more than the same
+    error size early on (when some transient is expected) -- this directly
+    penalizes slow settling and lightly-damped/oscillatory responses (error
+    that lingers or rings for a long time racks up a large time-weighted
+    sum), not just wherever the trajectory happens to be at the end.
+    A last-20s-mean fitness (the previous approach) is blind to *how* a
+    candidate got to its final error -- a gain set that takes 70s to ring
+    down to a tiny error scores identically to one that settles in 10s, as
+    long as both land in the same place by the time the window starts. ITAE
+    scores the whole trajectory, so the slow-ringing candidate is penalized
+    for every second it spent still oscillating.
+    Normalized by duration**2 to keep the scale in the same ballpark as a
+    plain mean error (so PENALTY_BASE=1000 stays a safe separation from any
+    feasible run's score) -- trapz(t*|e|, t) grows with duration**2 for a
+    fixed error profile, so dividing by it makes scores roughly
+    duration-independent."""
     log = simulate.run(duration=SIM_DURATION, trajectory="circle",
                         gain_preset=None, controller_kwargs=ctrl_kwargs)
     err = np.linalg.norm(log["err"], axis=1)
-    return err[log["t"] > (SIM_DURATION - SIM_STEADY_WINDOW)].mean()
+    t = log["t"]
+    itae = np.trapezoid(t * err, t)
+    return itae / SIM_DURATION ** 2
 
 
 def _fitness_3var(x):
@@ -121,7 +146,10 @@ SEARCHES = {
     "3var": dict(
         fitness=_fitness_3var,
         names=["kp_outer", "ki_outer", "kd_outer"],
-        bounds=np.array([[0.0, 1.0], [0.0, 0.5], [0.0, 2.0]]),
+        # Widened from [0,1]/[0,0.5]/[0,2] -- the previous run pinned
+        # kd_outer exactly at 2.0 and kp_outer near 1.0, a sign the true
+        # optimum sits past the old wall.
+        bounds=np.array([[0.0, 3.0], [0.0, 0.5], [0.0, 6.0]]),
     ),
     "5var_formula": dict(
         fitness=_fitness_5var_formula,
@@ -131,7 +159,9 @@ SEARCHES = {
     "5var_raw": dict(
         fitness=_fitness_5var_raw,
         names=["kp_inner", "kd_inner", "kp_outer", "ki_outer", "kd_outer"],
-        bounds=np.array([[1e-5, 5e-3], [1e-5, 2e-3], [0.0, 1.0], [0.0, 0.5], [0.0, 2.0]]),
+        # kp_inner/kd_inner bounds unchanged (previous best sat well inside
+        # them); kp_outer/kd_outer widened -- kp_outer pinned at 1.0 before.
+        bounds=np.array([[1e-5, 5e-3], [1e-5, 2e-3], [0.0, 3.0], [0.0, 0.5], [0.0, 6.0]]),
     ),
 }
 
@@ -158,7 +188,19 @@ def pso(fitness, bounds, n_particles=30, n_iters=40, w=0.7, c1=1.5, c2=1.5, seed
         r1 = rng.uniform(size=(n_particles, n_dims))
         r2 = rng.uniform(size=(n_particles, n_dims))
         vel = w * vel + c1 * r1 * (pbest_pos - pos) + c2 * r2 * (gbest_pos - pos)
-        pos = np.clip(pos + vel, lo, hi)
+        new_pos = pos + vel
+
+        # Absorbing boundary: zero out the velocity component that pushed a
+        # particle past a wall, instead of just clipping position and
+        # leaving velocity untouched. Without this, a particle whose true
+        # pull is past the wall gets teleported back to the wall every
+        # iteration but keeps re-commanding "go further" next iteration too
+        # -- it sits vibrating on the boundary forever, which looks exactly
+        # like "the optimum is at the boundary" even when it isn't.
+        hit_lo = new_pos < lo
+        hit_hi = new_pos > hi
+        vel[hit_lo | hit_hi] = 0.0
+        pos = np.clip(new_pos, lo, hi)
 
         vals = np.array([fitness(p) for p in pos])
         improved = vals < pbest_val
@@ -185,7 +227,7 @@ def run_search(name, n_particles=30, n_iters=40, seed=0):
         seed=seed, log=print,
     )
     print(f"best: {dict(zip(spec['names'], best_x))}")
-    print(f"fitness (steady-state tracking error, m; or {PENALTY_BASE}+violation if infeasible): {best_val:.5f}")
+    print(f"fitness (ITAE, time-weighted error integral; or {PENALTY_BASE}+violation if infeasible): {best_val:.5f}")
     return best_x, best_val, history
 
 

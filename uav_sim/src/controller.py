@@ -100,23 +100,36 @@ GAIN_PRESETS = {
         deriv_filter_N=10.0,            # Listing 2's "N_filter = 10" derivative low-pass
     ),
     # PSO-optimized (pso_tune.py), Z/yaw held at margin_safe's values in all
-    # three -- only the loops actually in question (inner roll/pitch, outer
-    # x/y) were searched. All three independently converged to ki_outer~=0,
-    # confirming hand_tuned's grid-search finding that integral action is
-    # what destroys this loop's margin. Several best values sit exactly on a
-    # search bound (kd_outer=2.0 here, kp_outer=1.0 in pso_5var_raw,
-    # zeta_inner=2.0 in pso_5var_formula) -- these are the best PSO found
-    # within the bounds searched, not necessarily a true unconstrained optimum.
+    # entries -- only the loops actually in question (inner roll/pitch, outer
+    # x/y) were searched. pso_3var and pso_5var_raw below are the WIDENED-BOUNDS
+    # rerun (100s evaluation window, absorbing-boundary fix -- see pso_tune.py),
+    # which superseded the original narrower-bounds run: pso_3var's first
+    # result (kd_outer=2.0) sat exactly on the old bound and turned out to be
+    # a clipping artifact, not a real optimum -- rerunning with wider bounds
+    # and a fixed boundary condition moved it to a genuine interior point
+    # (kd_outer=3.15). pso_5var_formula is unchanged from the original run.
     "pso_3var": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
                       wn_attitude=3.0, zeta_attitude=1.2,
-                      outer_gains=dict(kp=0.9124758772940267, ki=0.0, kd=2.0)),
+                      outer_gains=dict(kp=1.9535142179882756, ki=0.0, kd=3.1478587670803146)),
     "pso_5var_formula": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
                               wn_attitude=2.772591296019356, zeta_attitude=2.0,
                               outer_gains=dict(kp=0.404428459350719, ki=0.009966483625753524,
                                                 kd=1.542711618942076)),
+    # ki_outer landed at 0.5 (the search bound) in BOTH the w=0.7/c1=c2=1.5
+    # run and the constriction-parameter comparison run below -- a
+    # reproducible result, not seed noise, but still bound-pinned and thus
+    # still not confirmed as a true unconstrained optimum.
     "pso_5var_raw": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
-                          inner_gains=dict(kp=0.00012334409476751009, kd=7.406661793004076e-05),
-                          outer_gains=dict(kp=1.0, ki=0.0, kd=1.7316026182531068)),
+                          inner_gains=dict(kp=0.00011700601070021305, kd=6.948012627973457e-05),
+                          outer_gains=dict(kp=1.4491416563969373, ki=0.5, kd=1.5074285205288942)),
+    # Same search, same widened bounds, but Clerc's constriction-derived
+    # parameters (w=0.7298, c1=c2=1.4962) instead of this project's w=0.7/
+    # c1=c2=1.5, and a different seed -- kept separate to compare the two
+    # parameter choices' results directly rather than overwrite one.
+    "pso_5var_raw_constriction": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
+                                       inner_gains=dict(kp=0.00013808264815980633, kd=9.147128933600422e-05),
+                                       outer_gains=dict(kp=2.070769318214394, ki=0.4899932619282368,
+                                                         kd=2.5892797474110596)),
 }
 
 
