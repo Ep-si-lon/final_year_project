@@ -48,7 +48,7 @@ class QuadrotorDynamics:
         self.p = params if params is not None else CrazyflieParams()
         self.state = np.zeros(12) if state0 is None else np.array(state0, dtype=float)
 
-    def _deriv(self, x, u):
+    def _deriv(self, x, u, external_accel=None):
         _, _, _, vx, vy, vz, phi, theta, psi, p, q, r = x
         F, tau_phi, tau_theta, tau_psi = u
 
@@ -61,6 +61,10 @@ class QuadrotorDynamics:
         ax = (F / m) * (np.cos(phi) * np.sin(theta) * np.cos(psi) + np.sin(phi) * np.sin(psi))
         ay = (F / m) * (np.cos(phi) * np.sin(theta) * np.sin(psi) - np.sin(phi) * np.cos(psi))
         az = (F / m) * (np.cos(phi) * np.cos(theta)) - G
+        if external_accel is not None:
+            ax += external_accel[0]
+            ay += external_accel[1]
+            az += external_accel[2]
 
         phi_dot = p + q * np.sin(phi) * np.tan(theta) + r * np.cos(phi) * np.tan(theta)
         theta_dot = q * np.cos(phi) - r * np.sin(phi)
@@ -72,14 +76,19 @@ class QuadrotorDynamics:
 
         return np.array([vx, vy, vz, ax, ay, az, phi_dot, theta_dot, psi_dot, p_dot, q_dot, r_dot])
 
-    def step(self, u, dt):
+    def step(self, u, dt, external_accel=None):
         """Advance the state by dt (RK4) given control input u. This is the
-        numerical-integration step that stands in for a physics engine."""
+        numerical-integration step that stands in for a physics engine.
+
+        ``external_accel`` is an optional constant world-frame acceleration
+        used for disturbance-rejection tests (for example, a steady wind).
+        It defaults to zero and therefore does not alter existing simulations.
+        """
         x = self.state
-        k1 = self._deriv(x, u)
-        k2 = self._deriv(x + 0.5 * dt * k1, u)
-        k3 = self._deriv(x + 0.5 * dt * k2, u)
-        k4 = self._deriv(x + dt * k3, u)
+        k1 = self._deriv(x, u, external_accel)
+        k2 = self._deriv(x + 0.5 * dt * k1, u, external_accel)
+        k3 = self._deriv(x + 0.5 * dt * k2, u, external_accel)
+        k4 = self._deriv(x + dt * k3, u, external_accel)
         self.state = x + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
         return self.state
 

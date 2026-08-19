@@ -71,6 +71,11 @@ class LoopGains:
 #                  kp=0.3, ki=0.02, kd=0.8 clears both targets by a wide
 #                  margin (GM=18.7 dB, PM=64.4 deg) while keeping a little
 #                  integral action for drift rejection.
+#   "pso_optimized" keeps those same margin-safe inner loops and uses the
+#                  reproducible PSO result from pso_tune.py for the shared
+#                  outer X/Y gains.  The swarm was trained with a small
+#                  constant horizontal disturbance so Ki is identified from
+#                  an actual steady-state rejection requirement.
 GAIN_PRESETS = {
     "aggressive": dict(wn_z=3.0, zeta_z=1.0, wn_xy=2.2, zeta_xy=0.9,
                         wn_attitude=13.0, zeta_attitude=1.3, wn_yaw=6.0, zeta_yaw=1.2),
@@ -79,6 +84,11 @@ GAIN_PRESETS = {
     "hand_tuned": dict(wn_z=3.0, zeta_z=1.0, wn_xy=0.5, zeta_xy=0.9,
                         wn_attitude=3.0, zeta_attitude=1.2, wn_yaw=3.0, zeta_yaw=1.2,
                         outer_gains=dict(kp=0.3, ki=0.02, kd=0.8)),
+    "pso_optimized": dict(wn_z=3.0, zeta_z=1.0, wn_xy=0.5, zeta_xy=0.9,
+                           wn_attitude=3.0, zeta_attitude=1.2, wn_yaw=3.0, zeta_yaw=1.2,
+                           outer_gains=dict(kp=1.1259030542744382,
+                                            ki=0.4321178783227149,
+                                            kd=2.3130218719723104)),
 }
 
 
