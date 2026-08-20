@@ -3,13 +3,14 @@ simulation software involved (the motion itself comes entirely from
 uav_sim's own hand-written dynamics/controller, this file only draws it).
 
 Produces:
-  - flight_animation.mp4  (or .gif if ffmpeg is unavailable): a movie of the
-    drone flying the logged trajectory, orientation included.
-  - flight_filmstrip.png: a static grid of snapshots, for viewing inline
-    wherever an actual video can't be played.
+  - simulation/flight_animation.mp4 (or .gif if ffmpeg is unavailable): a
+    movie of the drone flying the logged trajectory, orientation included.
+  - simulation-images/flight_filmstrip.png: a static grid of snapshots, for
+    viewing inline wherever an actual video can't be played.
 """
 
 import shutil
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Line3DCollection
@@ -65,7 +66,10 @@ def animate_flight(log, filename=None, fps=30, playback_speed=4.0, arm_len=0.18)
 
     has_ffmpeg = shutil.which("ffmpeg") is not None
     if filename is None:
-        filename = "flight_animation.mp4" if has_ffmpeg else "flight_animation.gif"
+        filename = ("simulation/flight_animation.mp4" if has_ffmpeg
+                    else "simulation/flight_animation.gif")
+    output_path = Path(filename)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot(111, projection="3d")
@@ -94,14 +98,17 @@ def animate_flight(log, filename=None, fps=30, playback_speed=4.0, arm_len=0.18)
     from matplotlib.animation import FuncAnimation, PillowWriter, FFMpegWriter
     anim = FuncAnimation(fig, update, frames=len(idx), blit=False)
     writer = FFMpegWriter(fps=fps) if has_ffmpeg else PillowWriter(fps=fps)
-    anim.save(filename, writer=writer, dpi=110)
+    anim.save(output_path, writer=writer, dpi=110)
     plt.close(fig)
-    print(f"Saved animation to {filename} ({len(idx)} frames at {fps}fps, "
+    print(f"Saved animation to {output_path} ({len(idx)} frames at {fps}fps, "
           f"{playback_speed}x real time)")
-    return filename
+    return str(output_path)
 
 
-def filmstrip(log, n_frames=6, filename="flight_filmstrip.png", arm_len=0.18):
+def filmstrip(log, n_frames=6,
+              filename="simulation-images/flight_filmstrip.png", arm_len=0.18):
+    output_path = Path(filename)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     t, pos, att, ref = log["t"], log["pos"], log["att"], log["ref"]
     frame_idx = np.linspace(0, len(t) - 1, n_frames).astype(int)
 
@@ -118,10 +125,10 @@ def filmstrip(log, n_frames=6, filename="flight_filmstrip.png", arm_len=0.18):
         ax.set_zlim(max(0, pos[:, 2].min() - pad), pos[:, 2].max() + pad)
         ax.set_title(f"t = {t[frame]:.2f} s")
     plt.tight_layout()
-    plt.savefig(filename, dpi=130)
+    plt.savefig(output_path, dpi=130)
     plt.close(fig)
-    print(f"Saved filmstrip to {filename}")
-    return filename
+    print(f"Saved filmstrip to {output_path}")
+    return str(output_path)
 
 
 if __name__ == "__main__":

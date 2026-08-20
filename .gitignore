@@ -1,4 +1,87 @@
+# macOS / Windows metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Desktop.ini
+
+# Python bytecode and interpreter caches
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Python virtual environments
+.venv/
+venv/
+venv-*/
+env/
+env-*/
+ENV/
+
+# Python packaging and build artifacts
+build/
+dist/
+downloads/
+*.egg
+*.egg-info/
+.eggs/
+wheels/
+pip-wheel-metadata/
+MANIFEST
+
+# Test, coverage, lint, and type-check caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Jupyter and IPython
+.ipynb_checkpoints/
+.ipython/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Local environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Logs, crash dumps, and profiler output
+*.log
+*.pid
+*.pid.lock
+*.prof
+*.lprof
+*.stackdump
+
+# Tool-specific local caches
+.cache/
+.matplotlib/
+.mplconfig/
+.uv-cache/
+
+# Temporary and scratch files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+
+# Third-party validation code (keep the reproducible setup instructions)
 external/*
 !external/SETUP.md

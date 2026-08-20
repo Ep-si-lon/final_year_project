@@ -1,4 +1,15 @@
-numpy
-scipy
-matplotlib
-control
+# Core simulation and numerical calculations
+numpy>=2.0,<3.0
+scipy>=1.13,<2.0
+
+# Plots, flight filmstrips, and animation fallback
+matplotlib>=3.8,<4.0
+
+# Transfer functions, gain/phase margins, and stability analysis
+control>=0.10,<0.11
+
+# Optional tools are intentionally not installed here:
+# - MP4 generation uses the system-level FFmpeg executable. Without FFmpeg,
+#   visualize_flight.py automatically creates a GIF with Matplotlib/Pillow.
+# - Independent PyBullet validation requires a locally modified clone of
+#   gym-pybullet-drones; follow ../external/SETUP.md.

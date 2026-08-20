@@ -9,6 +9,7 @@ drifts less than the aggressive one.
 """
 
 import numpy as np
+from pathlib import Path
 from dynamics import QuadrotorDynamics, CrazyflieParams
 from controller import CascadedPIDController, GAIN_PRESETS
 from actuator import MotorLag
@@ -49,9 +50,11 @@ def run_step(gain_preset="aggressive", duration=10.0, dt=0.002, step_z=0.5):
     return log
 
 
-def plot(logs, filename="step_response.png"):
+def plot(logs, filename="simulation-images/step_response.png"):
     import matplotlib.pyplot as plt
 
+    output_path = Path(filename)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.5))
     labels = ["x (drift)", "y (drift)", "z (altitude)"]  # pos columns are [x, y, z]
     for col, label in enumerate(labels):
@@ -64,8 +67,8 @@ def plot(logs, filename="step_response.png"):
         ax.grid(True)
         ax.legend()
     plt.tight_layout()
-    plt.savefig(filename, dpi=150)
-    print(f"Saved plot to {filename}")
+    plt.savefig(output_path, dpi=150)
+    print(f"Saved plot to {output_path}")
 
 
 if __name__ == "__main__":

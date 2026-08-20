@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 def plot_results(log):
@@ -36,6 +37,8 @@ def plot_results(log):
     ax4.set_ylabel("||e|| [m]")
     ax4.set_title("Position error norm")
 
+    output_path = Path("simulation-images/simulation_result.png")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
-    plt.savefig("simulation_result.png", dpi=150)
-    print("Saved plot to simulation_result.png")
+    plt.savefig(output_path, dpi=150)
+    print(f"Saved plot to {output_path}")

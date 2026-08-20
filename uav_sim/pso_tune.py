@@ -208,9 +208,11 @@ def main():
     parser.add_argument("--dt", type=float, default=0.01)
     parser.add_argument("--validation-duration", type=float, default=60.0)
     parser.add_argument("--output-dir", type=Path, default=Path("pso_results"))
+    parser.add_argument("--image-dir", type=Path, default=Path("simulation-images"))
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    args.image_dir.mkdir(parents=True, exist_ok=True)
     formula_gains = np.array([0.5 ** 2, 0.5 ** 3, 2 * 0.9 * 0.5])
     hand_tuned_gains = np.array([0.3, 0.02, 0.8])
 
@@ -275,7 +277,7 @@ def main():
         "convergence": history.tolist(),
     }
     json_path = args.output_dir / "pso_results.json"
-    plot_path = args.output_dir / "pso_comparison.png"
+    plot_path = args.image_dir / "pso_comparison.png"
     json_path.write_text(json.dumps(result, indent=2) + "\n")
     comparison_plot(disturbed_baseline_log, disturbed_optimized_log, history, plot_path)
 

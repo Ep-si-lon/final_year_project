@@ -17,6 +17,7 @@ to match the Bitcraze datasheet value used in dynamics.py.CrazyflieParams).
 """
 
 import numpy as np
+from pathlib import Path
 from dynamics import QuadrotorDynamics, CrazyflieParams, G
 
 from gym_pybullet_drones.envs.CtrlAviary import CtrlAviary
@@ -120,8 +121,11 @@ def test_roll_coupling(duration=0.3, delta_frac=0.002):
     return t, (pb_phi, pb_vy, pb_y), (ours_phi, ours_vy, ours_y)
 
 
-def plot(t1, pb_z, ours_z, t2, pb_data, ours_data, filename="pybullet_validation.png"):
+def plot(t1, pb_z, ours_z, t2, pb_data, ours_data,
+         filename="simulation-images/pybullet_validation.png"):
     import matplotlib.pyplot as plt
+    output_path = Path(filename)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     pb_phi, pb_vy, pb_y = pb_data
     ours_phi, ours_vy, ours_y = ours_data
 
@@ -146,8 +150,8 @@ def plot(t1, pb_z, ours_z, t2, pb_data, ours_data, filename="pybullet_validation
     axes[2].legend(); axes[2].grid(True)
 
     plt.tight_layout()
-    plt.savefig(filename, dpi=150)
-    print(f"\nSaved plot to {filename}")
+    plt.savefig(output_path, dpi=150)
+    print(f"\nSaved plot to {output_path}")
 
 
 if __name__ == "__main__":
