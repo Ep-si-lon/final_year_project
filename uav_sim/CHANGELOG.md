@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-09-03 — Circle animation now takes off from the ground
+
+`animate_flight_3d_circle.py` previously started the drone pre-positioned
+at the circle's own t=0 point `(radius, 0, z)`, to isolate the
+tracking-only transient from a climb transient. Changed to start at the
+origin on the ground (`x0 = zeros(12)`), a real takeoff: climbs to z=10m
+and catches up to the moving circle reference over ~8s, then tracks it
+cleanly for the rest of the 100s (steady-state tracking error unchanged,
+~1.6cm after t>10s). Z-axis plot limits widened to `[0, Z+pad]` to show
+the full climb.
+
 ## 2026-09-03 — Fixed missing tilt-to-translate physics; redesigned outer-loop gains
 
 Attempting a circle trajectory (radius=1m, z=10m) surfaced a fundamental

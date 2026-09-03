@@ -16,8 +16,10 @@ documented in dynamics.py/controller.py/CHANGELOG.md:
 omega=0.125 is comfortably below the outer loop's own wn=0.6rad/s bandwidth
 (good tracking needs the trajectory frequency well under the control
 bandwidth, not just under the small-angle tilt limit) -- verified: ~1-2%
-tracking error. Starts the drone already at the circle's t=0 point
-(radius,0,z) at rest, so the only transient is spinning up to speed.
+tracking error. Starts the drone on the ground at the origin (0,0,0) at
+rest -- a real takeoff, climbing to z=10m and catching up to the moving
+circle reference over the first ~8s, rather than starting pre-positioned
+on the circle.
 
 Not a pytest test -- run directly: `python3
 uav_sim/validation_tests/animate_flight_3d_circle.py`. Needs matplotlib +
@@ -51,7 +53,7 @@ def simulate():
     params = CrazyflieParams()
     gains = gains_pole_placement_outer(params)
     controller = CascadedController(params=params, gains=gains, dt=DT, integral_clamp=0.5)
-    x0 = np.array([RADIUS, 0, Z, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=float)
+    x0 = np.zeros(12)  # ground takeoff from the origin, not pre-positioned on the circle
     sim = CrazyflieSim(params=params, x0=x0)
     log = np.zeros((STEPS + 1, 12))
     ref_log = np.zeros((STEPS + 1, 6))
@@ -102,7 +104,7 @@ def main():
     pad = 0.3
     ax.set_xlim(-RADIUS - pad, RADIUS + pad)
     ax.set_ylim(-RADIUS - pad, RADIUS + pad)
-    ax.set_zlim(Z - pad, Z + pad)
+    ax.set_zlim(0, Z + pad)  # 0 to show the ground takeoff, not just the cruise altitude
     ax.set_xlabel("px [m]")
     ax.set_ylabel("py [m]")
     ax.set_zlabel("pz [m]")
@@ -140,14 +142,14 @@ def main():
     print(f"Saved animation: {out_path}")
     plt.close(fig)
 
-    snap_times = [0, 3, 15, 30, 50, 75, 100]
+    snap_times = [0, 4, 8, 20, 40, 70, 100]
     fig2 = plt.figure(figsize=(18, 3))
     for k, st in enumerate(snap_times):
         i = min(int(st / DT), STEPS)
         ax2 = fig2.add_subplot(1, len(snap_times), k + 1, projection="3d")
         ax2.set_xlim(-RADIUS - pad, RADIUS + pad)
         ax2.set_ylim(-RADIUS - pad, RADIUS + pad)
-        ax2.set_zlim(Z - pad, Z + pad)
+        ax2.set_zlim(0, Z + pad)
         ax2.plot(RADIUS * np.cos(ring_theta), RADIUS * np.sin(ring_theta),
                   np.full_like(ring_theta, Z), "k--", linewidth=1, alpha=0.4)
         ax2.plot(px[:i + 1], py[:i + 1], pz[:i + 1], "b-", linewidth=1, alpha=0.6)
