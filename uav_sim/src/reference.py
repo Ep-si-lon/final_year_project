@@ -1,38 +1,29 @@
-"""Reference path generators -- this produces 'r' in the diagram.
-
-Each function returns a ref(t) -> (position[3], velocity[3], acceleration[3], yaw)
-closure. Velocity/acceleration are the exact time-derivatives of the position,
-computed analytically -- these feed the feedforward term in the controller so
-it doesn't have to rely on tracking error alone to "discover" where the
-reference is heading.
+"""Time-varying setpoint generators, returning ref6 = [px_c,py_c,pz_c,
+vx_c,vy_c,vz_c] (earth frame) for CascadedController.compute -- includes the
+exact tangential velocity, not just zero, so the outer-loop velocity term
+isn't fighting a moving target it's never told the speed of.
 """
-
 import numpy as np
 
 
-def hover(z=1.0):
-    def ref(t):
-        pos = np.array([0.0, 0.0, z])
-        vel = np.zeros(3)
-        acc = np.zeros(3)
-        yaw = 0.0
-        return pos, vel, acc, yaw
-    return ref
+def hover(t: float, x: float = 0.0, y: float = 0.0, z: float = 0.5) -> np.ndarray:
+    return np.array([x, y, z, 0.0, 0.0, 0.0])
 
 
-def circle(radius=1.0, omega=0.3, z=1.0):
-    """Circular path in the XY plane at fixed altitude z -- matches the
-    reference-tracking sketch from the prof (r drawn as a circle, y and e
-    marked against it).
-
-    x(t) = radius*cos(omega*t), y(t) = radius*sin(omega*t)
-    velocity/acceleration are its first/second time-derivatives.
-    """
-    def ref(t):
-        c, s = np.cos(omega * t), np.sin(omega * t)
-        pos = np.array([radius * c, radius * s, z])
-        vel = np.array([-radius * omega * s, radius * omega * c, 0.0])
-        acc = np.array([-radius * omega ** 2 * c, -radius * omega ** 2 * s, 0.0])
-        yaw = 0.0
-        return pos, vel, acc, yaw
-    return ref
+def circle(
+    t: float,
+    radius: float = 1.0,
+    z: float = 10.0,
+    omega: float = 0.5,
+    center_x: float = 0.0,
+    center_y: float = 0.0,
+) -> np.ndarray:
+    """Circle of given radius in the horizontal plane at altitude z, angular
+    rate omega [rad/s] (period = 2*pi/omega). omega=0.5 keeps the required
+    centripetal tilt small (~1.5deg for radius=1m: tilt ~= omega^2*radius/g),
+    staying within the controller's small-angle design assumption."""
+    px_c = center_x + radius * np.cos(omega * t)
+    py_c = center_y + radius * np.sin(omega * t)
+    vx_c = -radius * omega * np.sin(omega * t)
+    vy_c = radius * omega * np.cos(omega * t)
+    return np.array([px_c, py_c, z, vx_c, vy_c, 0.0])

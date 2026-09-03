@@ -1,4 +1,5 @@
-numpy
-scipy
-matplotlib
-control
+numpy>=1.24
+pytest>=7.0
+scipy>=1.10      # validation_tests/test_cross_validation.py only
+matplotlib>=3.7  # validation_tests/visualize_trajectory.py, reproduce_snider_figures.py
+control>=0.10    # src/stability_analysis.py, validation_tests/test_stability_margins.py

@@ -1,96 +1,68 @@
-"""Nonlinear rigid-body dynamics model of the Crazyflie 2.1.
+"""Nonlinear rigid-body equations of motion for the Crazyflie 2.1, per Snider
+Section 2 (p.2-3).
 
-This is the 'System / UAV' block in the r -> e -> Controller -> u -> System -> y
-diagram: it takes a control input u and integrates the equations of motion
-forward in time to produce the next state (from which y is read).
+State (12): [px, py, pz, u, v, w, phi, theta, psi, p, q, r]
+    px, py, pz  -- position, earth frame [m]
+    u, v, w     -- velocity, BODY frame [m/s]
+    phi, theta, psi -- roll, pitch, yaw [rad], ZYX Euler
+    p, q, r     -- body angular rates [rad/s]
+
+Input (4): [Z, L, M, N]
+    Z -- upward thrust [N]
+    L, M, N -- roll, pitch, yaw moments [N*m]
+
+theta = +-90 deg is a kinematic singularity (1/cos(theta) terms below) -- by
+design this is not handled, only documented (see tests/test_singularity.py).
 """
-
 import numpy as np
 
-G = 9.81  # m/s^2
+from .params import CrazyflieParams, Gammas
 
 
-class CrazyflieParams:
-    """Physical parameters for the Crazyflie 2.1.
+def rotation_body_to_earth(phi: float, theta: float, psi: float) -> np.ndarray:
+    """R = Rz(psi) @ Ry(theta) @ Rx(phi), body-frame vector -> earth frame."""
+    cphi, sphi = np.cos(phi), np.sin(phi)
+    ctheta, stheta = np.cos(theta), np.sin(theta)
+    cpsi, spsi = np.cos(psi), np.sin(psi)
 
-    mass: official Bitcraze datasheet ("Datasheet Crazyflie 2.1 - Rev 3"),
-    section 8, takeoff weight = 29 g.
-    https://www.bitcraze.io/documentation/hardware/crazyflie_2_1/crazyflie_2_1-datasheet.pdf
-
-    Ixx/Iyy/Izz/max_thrust: Bitcraze does not publish an inertia matrix or a
-    thrust rating in the datasheet (getting these requires a system-ID
-    measurement, not a spec-sheet number), so these are the values used by
-    the gym-pybullet-drones cf2x model (Panerati et al., "Learning to Fly",
-    IROS 2021 / arXiv:2103.02142), itself built on Crazyflie system
-    identification work. Verify against your own measurements if precision
-    matters for your results.
-    """
-
-    mass = 0.029        # kg  -- Bitcraze datasheet takeoff weight
-    Ixx = 1.4e-5        # kg*m^2  -- gym-pybullet-drones cf2x
-    Iyy = 1.4e-5        # kg*m^2  -- gym-pybullet-drones cf2x
-    Izz = 2.17e-5       # kg*m^2  -- gym-pybullet-drones cf2x
-    max_thrust = 0.64   # N, total over 4 motors (thrust-to-weight 2.25, gym-pybullet-drones cf2x)
-    max_torque = 3e-4   # N*m, per axis
+    Rz = np.array([[cpsi, -spsi, 0.0], [spsi, cpsi, 0.0], [0.0, 0.0, 1.0]])
+    Ry = np.array([[ctheta, 0.0, stheta], [0.0, 1.0, 0.0], [-stheta, 0.0, ctheta]])
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cphi, -sphi], [0.0, sphi, cphi]])
+    return Rz @ Ry @ Rx
 
 
-class QuadrotorDynamics:
-    """Euler-angle 6-DOF rigid-body model.
+def rigid_body_deriv(
+    state12: np.ndarray,
+    u4_actual: np.ndarray,
+    params: CrazyflieParams,
+    gammas: Gammas,
+) -> np.ndarray:
+    """dstate/dt for the 12-state rigid-body model. u4_actual is the *actual*
+    (post motor-lag) [Z, L, M, N] -- see actuator.py / plant.py for the lag."""
+    u, v, w = state12[3], state12[4], state12[5]
+    phi, theta, psi = state12[6], state12[7], state12[8]
+    p, q, r = state12[9], state12[10], state12[11]
+    Z, L, M, N = u4_actual
 
-    State x = [x, y, z, vx, vy, vz, phi, theta, psi, p, q, r]  (12,)
-        position, velocity (world frame), roll/pitch/yaw, body angular rates
-    Input u = [F, tau_phi, tau_theta, tau_psi]
-        total thrust + body-frame torques (the 'virtual' control input;
-        a motor mixer can map this to 4 individual rotor speeds later)
-    """
+    R = rotation_body_to_earth(phi, theta, psi)
+    p_dot_earth = R @ np.array([u, v, w])
 
-    def __init__(self, params=None, state0=None):
-        self.p = params if params is not None else CrazyflieParams()
-        self.state = np.zeros(12) if state0 is None else np.array(state0, dtype=float)
+    uvw_dot = np.array([r * v - q * w, p * w - r * u, q * u - p * v])
+    uvw_dot[2] += (Z - params.mass * params.g) / params.mass
 
-    def _deriv(self, x, u):
-        _, _, _, vx, vy, vz, phi, theta, psi, p, q, r = x
-        F, tau_phi, tau_theta, tau_psi = u
+    cphi, sphi = np.cos(phi), np.sin(phi)
+    ctheta, ttheta = np.cos(theta), np.tan(theta)
+    euler_kinematics = np.array([
+        [1.0, sphi * ttheta, cphi * ttheta],
+        [0.0, cphi, -sphi],
+        [0.0, sphi / ctheta, cphi / ctheta],
+    ])
+    euler_dot = euler_kinematics @ np.array([p, q, r])
 
-        F = np.clip(F, 0.0, self.p.max_thrust)
-        tau_phi = np.clip(tau_phi, -self.p.max_torque, self.p.max_torque)
-        tau_theta = np.clip(tau_theta, -self.p.max_torque, self.p.max_torque)
-        tau_psi = np.clip(tau_psi, -self.p.max_torque, self.p.max_torque)
+    pqr_dot = np.array([
+        gammas.g1 * p * q - gammas.g2 * q * r + gammas.g3 * L + gammas.g4 * N,
+        gammas.g5 * p * r - gammas.g6 * (p ** 2 - r ** 2) + M / params.Jyy,
+        gammas.g7 * p * q - gammas.g1 * q * r + gammas.g4 * L + gammas.g8 * N,
+    ])
 
-        m = self.p.mass
-        ax = (F / m) * (np.cos(phi) * np.sin(theta) * np.cos(psi) + np.sin(phi) * np.sin(psi))
-        ay = (F / m) * (np.cos(phi) * np.sin(theta) * np.sin(psi) - np.sin(phi) * np.cos(psi))
-        az = (F / m) * (np.cos(phi) * np.cos(theta)) - G
-
-        phi_dot = p + q * np.sin(phi) * np.tan(theta) + r * np.cos(phi) * np.tan(theta)
-        theta_dot = q * np.cos(phi) - r * np.sin(phi)
-        psi_dot = (q * np.sin(phi) + r * np.cos(phi)) / np.cos(theta)
-
-        p_dot = (tau_phi + (self.p.Iyy - self.p.Izz) * q * r) / self.p.Ixx
-        q_dot = (tau_theta + (self.p.Izz - self.p.Ixx) * p * r) / self.p.Iyy
-        r_dot = (tau_psi + (self.p.Ixx - self.p.Iyy) * p * q) / self.p.Izz
-
-        return np.array([vx, vy, vz, ax, ay, az, phi_dot, theta_dot, psi_dot, p_dot, q_dot, r_dot])
-
-    def step(self, u, dt):
-        """Advance the state by dt (RK4) given control input u. This is the
-        numerical-integration step that stands in for a physics engine."""
-        x = self.state
-        k1 = self._deriv(x, u)
-        k2 = self._deriv(x + 0.5 * dt * k1, u)
-        k3 = self._deriv(x + 0.5 * dt * k2, u)
-        k4 = self._deriv(x + dt * k3, u)
-        self.state = x + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
-        return self.state
-
-    @property
-    def position(self):
-        return self.state[0:3]
-
-    @property
-    def velocity(self):
-        return self.state[3:6]
-
-    @property
-    def attitude(self):
-        return self.state[6:9]  # phi, theta, psi
+    return np.concatenate([p_dot_earth, uvw_dot, euler_dot, pqr_dot])

@@ -1,270 +1,163 @@
-"""The 'Controller' block: takes error e = r - y, produces control input u.
+"""Cascaded PID/PD controller, per Snider Section 5 and Listing 2 (p.10-11).
 
-Cascaded PID/PD architecture, gains derived from pole-placement formulas
-(natural frequency omega_n + damping ratio zeta per loop) following the
-WashU ESE4481 CrazyFlie 2.1 report, Section 5.2:
+Z (thrust) and N (yaw) are single PD loops. L (roll) and M (pitch) are
+cascaded: an outer PID on lateral position/velocity produces a commanded tilt
+angle (small-angle inversion, p.9 Eq. trim relations), fed to an inner PD on
+attitude/rate.
 
-    Z, inner attitude (phi, theta), yaw (psi):  PD, direct rate feedback
-        kp = J * wn^2          kd = J * 2*zeta*wn      (J = mass for Z)
-    outer position (x, y):  PID, direct velocity feedback, in the
-    acceleration domain (the /g conversion to a commanded tilt angle is a
-    separate explicit step below, matching this module's existing structure)
-        kp = wn^2   ki = wn^3   kd = 2*zeta*wn
+Gains are computed from Listing 2's own zeta/w_n design parameters, not
+copied from Table 1 (p.29) -- Table 1's k_pphi "Simulation" entry
+(1.4194e-4) is an apparent digit-transposition typo: every other tabulated
+gain matches Jxx/Jyy/Jzz*w_n^2 (or *2*zeta*w_n) to 4-5 significant figures,
+but k_pphi = Jxx*w_n_roll^2 with Listing 2's own w_n_roll=3.0 computes to
+1.4914e-4, not 1.4194e-4. See CHANGELOG.md.
 
-Rate/velocity feedback (using the true state, not a finite difference of
-the error) avoids "derivative kick" when the setpoint itself is moving --
-the same reason the reference report reads gyro rate directly instead of
-differentiating the attitude error.
+Reference `ref6 = [px_c, py_c, pz_c, vx_c, vy_c, vz_c]` is in the EARTH
+frame (Eq. 2 setpoint), matching Listing 4's own `ref` vector. Since this
+plant's state stores u,v,w in the BODY frame (Section 2), velocities are
+rotated to earth frame here before comparing against ref6 -- Listing 4's own
+script instead keeps a world-frame velocity state and only rotates into body
+frame right before calling the dynamics function (and back out again after),
+an internal inconsistency in that script; rotating once, here, at the
+controller boundary is the physically correct place to do it and gives the
+same near-hover behavior Listing 4's script does.
+
+Listing 2's own code computes `e_p = 0 - p` then `L = k_pphi*e_phi +
+k_dphi*e_p` (i.e. `-k_dphi*p`), which is the OPPOSITE sign from Section
+5.1's prose ("L = ... + k_dphi*p_hat"). The code is what actually produced
+Fig. 12/13, so it's what's implemented here; see CHANGELOG.md.
 """
+from dataclasses import dataclass
 
 import numpy as np
-from dynamics import G, CrazyflieParams
+
+from .dynamics import rotation_body_to_earth
+from .params import CrazyflieParams
 
 
-class Integrator:
-    """Plain accumulator with anti-windup clamping, for the outer PID's I-term."""
+@dataclass(frozen=True)
+class ControllerGains:
+    k_pz: float = 0.297
+    k_dz: float = 0.198
 
-    def __init__(self, limit=None):
-        self.value = 0.0
-        self.limit = limit
+    k_pphi: float = 1.4914539e-4
+    k_dphi: float = 1.19316312e-4
+    k_ptheta: float = 1.499004180e-4
+    k_dtheta: float = 1.499004180e-4
+    k_ppsi: float = 1.82885325e-4
+    k_dpsi: float = 1.75569912e-4
 
-    def reset(self):
-        self.value = 0.0
+    k_px: float = 0.2
+    k_ix: float = 0.1
+    k_dx: float = 0.1
+    k_py: float = 0.2
+    k_iy: float = 0.1
+    k_dy: float = 0.1
 
-    def step(self, error, dt):
-        self.value += error * dt
-        if self.limit is not None:
-            self.value = np.clip(self.value, -self.limit, self.limit)
-        return self.value
-
-
-class LoopGains:
-    """Pole-placement gain derivation, Section 5.2 of the reference report."""
-
-    def __init__(self, wn, zeta, scale=1.0, ki=False):
-        self.kp = scale * wn ** 2
-        self.kd = scale * 2 * zeta * wn
-        self.ki = scale * wn ** 3 if ki else 0.0
+    N_filter: float = 10.0
 
 
-# Two gain presets, deliberately kept side by side rather than picking one --
-# see stability_analysis.py for the frequency-domain numbers behind each:
-#
-#   "aggressive"   circle-tracking error 0.83 cm, attitude-loop phase margin
-#                  13.8 deg (target >45 deg, FAILS). Great nominal performance,
-#                  but only ~14 ms of unmodeled delay/model error before the
-#                  attitude loop can start oscillating -- fine for a pure
-#                  simulation study, risky if ever pointed at real hardware.
-#   "margin_safe"  circle-tracking error ~20 cm, attitude-loop phase margin
-#                  46.7 deg (PASSES), matching the reference report's own
-#                  target and its roll-inner-loop result almost exactly.
-#                  ~131 ms of tolerable unmodeled delay -- an order of
-#                  magnitude more robustness margin, at a real cost in
-#                  tracking accuracy.
-#   "hand_tuned"   same Z/attitude/yaw as margin_safe (already pass), but the
-#                  outer x/y loop gains are hand-picked (outer_kp/ki/kd below)
-#                  instead of coming from the wn_xy/zeta_xy formula -- exactly
-#                  what the reference report did for this exact loop, after
-#                  finding the formula "cumbersome" there. A grid search over
-#                  kp/ki/kd found the integral term is what was destroying the
-#                  outer loop's margin (every passing combination had ki~0);
-#                  kp=0.3, ki=0.02, kd=0.8 clears both targets by a wide
-#                  margin (GM=18.7 dB, PM=64.4 deg) while keeping a little
-#                  integral action for drift rejection.
-#   "reference_replica"  a literal copy of the report's own Listing 2/3 numbers
-#                  -- not our formula-derived gains, THEIR five hand-picked
-#                  values per cascaded axis (wn_inner, zeta_inner, kp_outer,
-#                  ki_outer, kd_outer), including their asymmetric roll vs.
-#                  pitch inner loop (zeta_roll=1.2 vs zeta_pitch=1.5, a
-#                  discrepancy in the report itself despite its text claiming
-#                  "the same bandwidth and damping" for both) and their
-#                  outer-loop derivative low-pass filter (N=10), which their
-#                  report says was "necessary due to instability from
-#                  amplifying errors" when differentiating a noisy position
-#                  error. Use this preset as the fidelity baseline; build
-#                  improvements (like margin_safe/hand_tuned) on top of it.
-GAIN_PRESETS = {
-    "aggressive": dict(wn_z=3.0, zeta_z=1.0, wn_xy=2.2, zeta_xy=0.9,
-                        wn_attitude=13.0, zeta_attitude=1.3, wn_yaw=6.0, zeta_yaw=1.2),
-    "margin_safe": dict(wn_z=3.0, zeta_z=1.0, wn_xy=0.5, zeta_xy=0.9,
-                         wn_attitude=3.0, zeta_attitude=1.2, wn_yaw=3.0, zeta_yaw=1.2),
-    "hand_tuned": dict(wn_z=3.0, zeta_z=1.0, wn_xy=0.5, zeta_xy=0.9,
-                        wn_attitude=3.0, zeta_attitude=1.2, wn_yaw=3.0, zeta_yaw=1.2,
-                        outer_gains=dict(kp=0.3, ki=0.02, kd=0.8)),
-    "reference_replica": dict(
-        wn_z=3.0, zeta_z=1.0,
-        wn_phi=3.0, zeta_phi=1.2,       # L (roll) inner loop, Sec 6.2
-        wn_theta=3.0, zeta_theta=1.5,   # M (pitch) inner loop, Sec 6.3
-        wn_yaw=2.5, zeta_yaw=1.2,       # N (yaw), Sec 6.4
-        outer_gains=dict(kp=0.2, ki=0.1, kd=0.1),  # kpx=kpy, kix=kiy, kdx=kdy, Listing 2
-        deriv_filter_N=10.0,            # Listing 2's "N_filter = 10" derivative low-pass
-    ),
-    # PSO-optimized (pso_tune.py), Z/yaw held at margin_safe's values in all
-    # entries -- only the loops actually in question (inner roll/pitch, outer
-    # x/y) were searched. pso_3var and pso_5var_raw below are the WIDENED-BOUNDS
-    # rerun (100s evaluation window, absorbing-boundary fix -- see pso_tune.py),
-    # which superseded the original narrower-bounds run: pso_3var's first
-    # result (kd_outer=2.0) sat exactly on the old bound and turned out to be
-    # a clipping artifact, not a real optimum -- rerunning with wider bounds
-    # and a fixed boundary condition moved it to a genuine interior point
-    # (kd_outer=3.15). pso_5var_formula is unchanged from the original run.
-    "pso_3var": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
-                      wn_attitude=3.0, zeta_attitude=1.2,
-                      outer_gains=dict(kp=1.9535142179882756, ki=0.0, kd=3.1478587670803146)),
-    "pso_5var_formula": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
-                              wn_attitude=2.772591296019356, zeta_attitude=2.0,
-                              outer_gains=dict(kp=0.404428459350719, ki=0.009966483625753524,
-                                                kd=1.542711618942076)),
-    # ki_outer landed at 0.5 (the search bound) in BOTH the w=0.7/c1=c2=1.5
-    # run and the constriction-parameter comparison run below -- a
-    # reproducible result, not seed noise, but still bound-pinned and thus
-    # still not confirmed as a true unconstrained optimum.
-    "pso_5var_raw": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
-                          inner_gains=dict(kp=0.00011700601070021305, kd=6.948012627973457e-05),
-                          outer_gains=dict(kp=1.4491416563969373, ki=0.5, kd=1.5074285205288942)),
-    # Same search, same widened bounds, but Clerc's constriction-derived
-    # parameters (w=0.7298, c1=c2=1.4962) instead of this project's w=0.7/
-    # c1=c2=1.5, and a different seed -- kept separate to compare the two
-    # parameter choices' results directly rather than overwrite one.
-    "pso_5var_raw_constriction": dict(wn_z=3.0, zeta_z=1.0, wn_yaw=3.0, zeta_yaw=1.2,
-                                       inner_gains=dict(kp=0.00013808264815980633, kd=9.147128933600422e-05),
-                                       outer_gains=dict(kp=2.070769318214394, ki=0.4899932619282368,
-                                                         kd=2.5892797474110596)),
-}
+def gains_from_report_design_parameters(params: CrazyflieParams) -> ControllerGains:
+    """Recompute the gains directly from Listing 2's zeta/w_n design
+    parameters and this plant's own Jxx/Jyy/Jzz/mass, rather than the
+    hardcoded ControllerGains() defaults (useful if params ever change)."""
+    zeta_z, wn_z = 1.0, 3.0
+    zeta_roll, wn_roll = 1.2, 3.0
+    zeta_pitch, wn_pitch = 1.5, 3.0
+    zeta_yaw, wn_yaw = 1.2, 2.5
+    return ControllerGains(
+        k_pz=params.mass * wn_z ** 2,
+        k_dz=params.mass * 2 * zeta_z * wn_z,
+        k_pphi=params.Jxx * wn_roll ** 2,
+        k_dphi=params.Jxx * 2 * zeta_roll * wn_roll,
+        k_ptheta=params.Jyy * wn_pitch ** 2,
+        k_dtheta=params.Jyy * 2 * zeta_pitch * wn_pitch,
+        k_ppsi=params.Jzz * wn_yaw ** 2,
+        k_dpsi=params.Jzz * 2 * zeta_yaw * wn_yaw,
+    )
 
 
-class CascadedPIDController:
-    """Outer position loop (PID) -> desired attitude/thrust,
-    inner attitude loop (PD, rate feedback) -> body torques.
+class CascadedController:
+    """Stateful controller: instantiate once, call .compute(state12, ref6)
+    once per control step (matches Listing 2's per-call signature, which
+    threads integral_x/integral_y/filtered state through explicitly)."""
 
-    Bandwidths below follow the reference report's guidance: inner loop
-    (attitude) bandwidth should be ~5-10x the outer loop (position)
-    bandwidth, or the outer loop sees phase lag from a "slow" inner loop.
-    Defaults to the "aggressive" preset -- pass gains=GAIN_PRESETS["margin_safe"]
-    (unpacked) for the frequency-margin-justified alternative.
-    """
+    def __init__(
+        self,
+        params: CrazyflieParams = None,
+        gains: ControllerGains = None,
+        dt: float = 0.002,
+        integral_clamp: float = None,
+    ):
+        """integral_clamp: None (default) reproduces Listing 2 exactly --
+        no anti-windup, matching the report's own MATLAB "Simulation"
+        controller used for Fig. 12/13/Section 6. Over long runs (~100s+)
+        this lets integral_x/integral_y grow without bound whenever a
+        steady-state position error persists, which in turn drives phi/theta
+        to diverge (verified: reaches ~2 rad by t=100s for the report's own
+        hover+disturbance scenario) -- a real property of the report's own
+        controller, not a bug in this implementation. Passing a value (e.g.
+        0.5, matching the firmware's own `constrain(...,-0.5,0.5)` in
+        Listing 6, p.28) clamps integral_x/integral_y to +-that value each
+        step, for long-duration simulations where bounded behavior is
+        wanted instead of a literal Listing-2 reproduction."""
+        self.params = params if params is not None else CrazyflieParams()
+        self.gains = gains if gains is not None else ControllerGains()
+        self.dt = dt
+        self.integral_clamp = integral_clamp
+        self.integral_x = 0.0
+        self.integral_y = 0.0
+        self.filtered_e_vx = 0.0
+        self.filtered_e_vy = 0.0
+        self._alpha = self.gains.N_filter * dt / (1.0 + self.gains.N_filter * dt)
 
-    def __init__(self, params=None,
-                 wn_z=3.0, zeta_z=1.0,
-                 wn_xy=2.2, zeta_xy=0.9,
-                 wn_attitude=13.0, zeta_attitude=1.3,
-                 wn_phi=None, zeta_phi=None, wn_theta=None, zeta_theta=None,
-                 wn_yaw=6.0, zeta_yaw=1.2,
-                 i_limit=2.0, outer_gains=None, deriv_filter_N=None, inner_gains=None):
-        self.p = params if params is not None else CrazyflieParams()
+    def reset(self) -> None:
+        self.integral_x = 0.0
+        self.integral_y = 0.0
+        self.filtered_e_vx = 0.0
+        self.filtered_e_vy = 0.0
 
-        # wn_phi/zeta_phi (roll) and wn_theta/zeta_theta (pitch) override
-        # wn_attitude/zeta_attitude independently, for presets (like the
-        # reference report) that tune the two inner loops asymmetrically.
-        wn_phi = wn_attitude if wn_phi is None else wn_phi
-        zeta_phi = zeta_attitude if zeta_phi is None else zeta_phi
-        wn_theta = wn_attitude if wn_theta is None else wn_theta
-        zeta_theta = zeta_attitude if zeta_theta is None else zeta_theta
+    def compute(self, state12: np.ndarray, ref6: np.ndarray) -> np.ndarray:
+        """Returns commanded [Z, L, M, N]. ref6 = [px_c,py_c,pz_c,vx_c,vy_c,vz_c]."""
+        g = self.gains
+        px, py, pz = state12[0], state12[1], state12[2]
+        u, v, w = state12[3], state12[4], state12[5]
+        phi, theta, psi = state12[6], state12[7], state12[8]
+        p, q, r = state12[9], state12[10], state12[11]
 
-        # Derivative low-pass filter (report Listing 2's "N_filter"), applied
-        # to the outer x/y velocity-feedback term. Off by default -- this
-        # project reads true velocity state rather than differentiating a
-        # noisy position error, so there's normally no derivative kick to
-        # filter away; the reference_replica preset turns it on to match
-        # the report's Sec 6.2/6.3 outer-loop transfer functions exactly.
-        self.deriv_filter_N = deriv_filter_N
-        self.filt_evx = 0.0
-        self.filt_evy = 0.0
+        R = rotation_body_to_earth(phi, theta, psi)
+        vx, vy, vz = R @ np.array([u, v, w])
 
-        # Z: PD only (no integral) -- thrust's gravity feedforward already
-        # removes the steady-state bias an integral term would otherwise fix.
-        self.g_z = LoopGains(wn_z, zeta_z)
+        e_x = ref6[0] - px
+        e_y = ref6[1] - py
+        e_z = ref6[2] - pz
+        e_vx = ref6[3] - vx
+        e_vy = ref6[4] - vy
+        e_vz = ref6[5] - vz
 
-        # Outer position loops: PID, acceleration domain (no /g here --
-        # the /g happens explicitly in the small-angle inversion below).
-        # outer_gains, if given, bypasses the wn_xy/zeta_xy formula entirely
-        # with directly hand-picked {kp, ki, kd} -- mirrors the reference
-        # report abandoning the formula for this specific loop.
-        if outer_gains is not None:
-            self.g_x = LoopGains.__new__(LoopGains)
-            self.g_x.kp, self.g_x.ki, self.g_x.kd = outer_gains["kp"], outer_gains["ki"], outer_gains["kd"]
-            self.g_y = LoopGains.__new__(LoopGains)
-            self.g_y.kp, self.g_y.ki, self.g_y.kd = outer_gains["kp"], outer_gains["ki"], outer_gains["kd"]
-        else:
-            self.g_x = LoopGains(wn_xy, zeta_xy, ki=True)
-            self.g_y = LoopGains(wn_xy, zeta_xy, ki=True)
-        self.int_x = Integrator(limit=i_limit)
-        self.int_y = Integrator(limit=i_limit)
+        self.integral_x += e_x * self.dt
+        self.integral_y += e_y * self.dt
+        if self.integral_clamp is not None:
+            self.integral_x = np.clip(self.integral_x, -self.integral_clamp, self.integral_clamp)
+            self.integral_y = np.clip(self.integral_y, -self.integral_clamp, self.integral_clamp)
 
-        # Inner attitude loops: PD, torque domain, scaled by inertia.
-        # inner_gains, if given, bypasses the wn_phi/zeta_phi (and
-        # wn_theta/zeta_theta) formula entirely with directly hand-picked
-        # {kp, kd} applied symmetrically to both roll and pitch -- used by
-        # pso_tune.py's raw-gain search variant.
-        if inner_gains is not None:
-            self.g_phi = LoopGains.__new__(LoopGains)
-            self.g_phi.kp, self.g_phi.kd, self.g_phi.ki = inner_gains["kp"], inner_gains["kd"], 0.0
-            self.g_theta = LoopGains.__new__(LoopGains)
-            self.g_theta.kp, self.g_theta.kd, self.g_theta.ki = inner_gains["kp"], inner_gains["kd"], 0.0
-        else:
-            self.g_phi = LoopGains(wn_phi, zeta_phi, scale=self.p.Ixx)
-            self.g_theta = LoopGains(wn_theta, zeta_theta, scale=self.p.Iyy)
+        self.filtered_e_vx = (1 - self._alpha) * self.filtered_e_vx + self._alpha * e_vx
+        self.filtered_e_vy = (1 - self._alpha) * self.filtered_e_vy + self._alpha * e_vy
 
-        # Yaw: PD only, torque domain.
-        self.g_psi = LoopGains(wn_yaw, zeta_yaw, scale=self.p.Izz)
+        theta_c = g.k_px * e_x + g.k_ix * self.integral_x + g.k_dx * self.filtered_e_vx
+        phi_c = -(g.k_py * e_y + g.k_iy * self.integral_y + g.k_dy * self.filtered_e_vy)
 
-        self.max_tilt = np.deg2rad(25)  # limit commanded roll/pitch
+        Z = self.params.mass * self.params.g + g.k_pz * e_z + g.k_dz * e_vz
 
-    def compute(self, state, ref_pos, dt, ref_yaw=0.0, ref_vel=None, ref_acc=None):
-        """state: 12-vector from QuadrotorDynamics.
-        ref_pos: desired [x, y, z] -- this is 'r' in the diagram.
-        ref_vel, ref_acc: desired [vx,vy,vz] / [ax,ay,az] from the reference
-            trajectory (feedforward + velocity-feedback target). Default to
-            zero, which reduces to pure feedback around a fixed point.
-        returns (u, e_pos) where u = [F, tau_phi, tau_theta, tau_psi]."""
-        if ref_vel is None:
-            ref_vel = np.zeros(3)
-        if ref_acc is None:
-            ref_acc = np.zeros(3)
+        e_phi = phi_c - phi
+        e_theta = theta_c - theta
+        e_psi = 0.0 - psi
+        e_p = 0.0 - p
+        e_q = 0.0 - q
+        e_r = 0.0 - r
 
-        pos = state[0:3]
-        vel = state[3:6]
-        phi, theta, psi = state[6:9]
-        p_rate, q_rate, r_rate = state[9:12]
+        L = g.k_pphi * e_phi + g.k_dphi * e_p
+        M = g.k_ptheta * e_theta + g.k_dtheta * e_q
+        N = g.k_ppsi * e_psi + g.k_dpsi * e_r
 
-        e_pos = ref_pos - pos      # this is 'e' in the diagram
-        e_vel = ref_vel - vel
-
-        # ---- Z: PD + feedforward, direct vertical-velocity feedback ----
-        az_cmd = ref_acc[2] + self.g_z.kp * e_pos[2] + self.g_z.kd * e_vel[2]
-        F = self.p.mass * (G + az_cmd) / (np.cos(phi) * np.cos(theta) + 1e-6)
-
-        # ---- Outer X/Y: PID + feedforward, direct velocity feedback ----
-        ix = self.int_x.step(e_pos[0], dt)
-        iy = self.int_y.step(e_pos[1], dt)
-
-        e_vel_x, e_vel_y = e_vel[0], e_vel[1]
-        if self.deriv_filter_N is not None:
-            alpha = self.deriv_filter_N * dt / (1 + self.deriv_filter_N * dt)
-            self.filt_evx = (1 - alpha) * self.filt_evx + alpha * e_vel_x
-            self.filt_evy = (1 - alpha) * self.filt_evy + alpha * e_vel_y
-            e_vel_x, e_vel_y = self.filt_evx, self.filt_evy
-
-        ax_cmd = ref_acc[0] + self.g_x.kp * e_pos[0] + self.g_x.ki * ix + self.g_x.kd * e_vel_x
-        ay_cmd = ref_acc[1] + self.g_y.kp * e_pos[1] + self.g_y.ki * iy + self.g_y.kd * e_vel_y
-
-        # small-angle inversion: desired horizontal accel -> desired tilt
-        phi_des = np.clip(
-            (ax_cmd * np.sin(ref_yaw) - ay_cmd * np.cos(ref_yaw)) / G,
-            -self.max_tilt, self.max_tilt)
-        theta_des = np.clip(
-            (ax_cmd * np.cos(ref_yaw) + ay_cmd * np.sin(ref_yaw)) / G,
-            -self.max_tilt, self.max_tilt)
-
-        # ---- Inner attitude: PD, direct gyro-rate feedback (target rate 0) ----
-        e_phi = phi_des - phi
-        e_theta = theta_des - theta
-        tau_phi = self.g_phi.kp * e_phi - self.g_phi.kd * p_rate
-        tau_theta = self.g_theta.kp * e_theta - self.g_theta.kd * q_rate
-
-        # ---- Yaw: PD, direct gyro-rate feedback (target rate 0) ----
-        e_psi = ref_yaw - psi
-        tau_psi = self.g_psi.kp * e_psi - self.g_psi.kd * r_rate
-
-        u = np.array([F, tau_phi, tau_theta, tau_psi])
-        return u, e_pos
+        return np.array([Z, L, M, N])
