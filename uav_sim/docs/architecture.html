@@ -1,0 +1,885 @@
+<title>uav_sim Architecture</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+  :root{
+    --bg:#EDF1EE;
+    --surface:#FFFFFF;
+    --surface-2:#F4F7F4;
+    --ink:#17233A;
+    --ink-soft:#4B5A70;
+    --ink-faint:#7C8AA0;
+    --line:#CBD6D2;
+    --line-soft:#DCE4E0;
+    --accent:#C97A24;
+    --accent-ink:#7A4A12;
+    --accent-2:#1E7A76;
+    --accent-2-ink:#0F4F4C;
+    --code-bg:#10192B;
+    --code-fg:#DCE6EC;
+    --code-line:#28374D;
+    --code-comment:#6C8296;
+    --code-keyword:#E8A458;
+    --code-str:#8FD19E;
+    --code-func:#7BC7C4;
+    --code-num:#D98E8E;
+    --shadow: 0 1px 2px rgba(23,35,58,0.06), 0 6px 20px rgba(23,35,58,0.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0A0F1A;
+      --surface:#111A29;
+      --surface-2:#0D1524;
+      --ink:#E7ECF2;
+      --ink-soft:#9FB1C4;
+      --ink-faint:#67788D;
+      --line:#25334A;
+      --line-soft:#1B2637;
+      --accent:#E2A45C;
+      --accent-ink:#F3CB98;
+      --accent-2:#4FC3C0;
+      --accent-2-ink:#9BE6E3;
+      --code-bg:#0B1220;
+      --code-fg:#DCE6EC;
+      --code-line:#243248;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0A0F1A;
+    --surface:#111A29;
+    --surface-2:#0D1524;
+    --ink:#E7ECF2;
+    --ink-soft:#9FB1C4;
+    --ink-faint:#67788D;
+    --line:#25334A;
+    --line-soft:#1B2637;
+    --accent:#E2A45C;
+    --accent-ink:#F3CB98;
+    --accent-2:#4FC3C0;
+    --accent-2-ink:#9BE6E3;
+    --code-bg:#0B1220;
+    --code-fg:#DCE6EC;
+    --code-line:#243248;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"IBM Plex Serif", Georgia, serif;
+    font-size:17px;
+    line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,h4,.mono-label,nav,.chip,.stat-num,.stat-label,th,.eyebrow{
+    font-family:"IBM Plex Sans", "Segoe UI", sans-serif;
+  }
+  code,pre,.mono,.tree,.sig,.io-tag{
+    font-family:"IBM Plex Mono", ui-monospace, monospace;
+  }
+  h1,h2,h3,h4{ text-wrap:balance; color:var(--ink); font-weight:700; }
+  a{ color:var(--accent-2); }
+  a:focus-visible, button:focus-visible, summary:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+  .layout{ display:flex; align-items:flex-start; max-width:1180px; margin:0 auto; gap:40px; padding:0 24px 100px; }
+
+  /* ---- Sidebar ---- */
+  nav.toc{
+    position:sticky; top:0; align-self:flex-start;
+    width:250px; flex:0 0 250px;
+    padding:36px 0 36px 0;
+    max-height:100vh; overflow-y:auto;
+  }
+  nav.toc .brand{ font-weight:700; font-size:14px; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-faint); margin-bottom:18px; }
+  nav.toc ol{ list-style:none; margin:0; padding:0; border-left:2px solid var(--line); }
+  nav.toc li{ margin:0; }
+  nav.toc a{
+    display:block; padding:7px 0 7px 16px; margin-left:-2px; border-left:2px solid transparent;
+    color:var(--ink-soft); text-decoration:none; font-size:14px; line-height:1.4;
+  }
+  nav.toc a:hover{ color:var(--ink); border-left-color:var(--accent-2); }
+  nav.toc .num{ color:var(--accent); font-variant-numeric:tabular-nums; margin-right:6px; }
+
+  main{ flex:1 1 auto; min-width:0; padding-top:36px; }
+
+  /* ---- Header ---- */
+  header.hero{ margin-bottom:44px; }
+  .eyebrow{ font-size:12px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; color:var(--accent-ink); background:color-mix(in srgb, var(--accent) 14%, transparent); display:inline-block; padding:4px 10px; border-radius:3px; margin-bottom:16px; }
+  header.hero h1{ font-size:38px; line-height:1.12; margin:0 0 12px; }
+  header.hero p.lede{ font-size:18px; color:var(--ink-soft); max-width:62ch; margin:0 0 22px; font-family:"IBM Plex Serif",serif; }
+  .stat-row{ display:flex; gap:0; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--surface); box-shadow:var(--shadow); }
+  .stat{ flex:1; padding:14px 18px; border-right:1px solid var(--line); }
+  .stat:last-child{ border-right:none; }
+  .stat-num{ font-size:22px; font-weight:700; color:var(--ink); font-variant-numeric:tabular-nums; }
+  .stat-label{ font-size:11.5px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.05em; margin-top:2px; }
+
+  /* ---- Sections ---- */
+  section{ margin-bottom:64px; padding-top:8px; scroll-margin-top:20px; }
+  section > .num-heading{ display:flex; align-items:baseline; gap:14px; margin-bottom:6px; }
+  section > .num-heading .n{ font-family:"IBM Plex Mono",monospace; font-size:15px; color:var(--accent); font-weight:600; }
+  section h2{ font-size:26px; margin:0; }
+  section .section-sub{ color:var(--ink-faint); font-size:14.5px; margin:0 0 22px; font-family:"IBM Plex Sans",sans-serif;}
+  section h3{ font-size:19px; margin:34px 0 10px; }
+  p{ margin:0 0 16px; max-width:70ch; }
+  ul,ol{ max-width:70ch; padding-left:22px; margin:0 0 16px;}
+  li{ margin-bottom:6px; }
+
+  /* ---- file-card intro ---- */
+  .file-card{
+    display:flex; align-items:center; gap:14px;
+    background:var(--surface); border:1px solid var(--line); border-radius:8px;
+    padding:14px 18px; margin:0 0 20px; box-shadow:var(--shadow);
+  }
+  .file-card .path{ font-family:"IBM Plex Mono",monospace; font-weight:600; font-size:15px; color:var(--ink); }
+  .file-card .desc{ color:var(--ink-soft); font-size:14.5px; font-family:"IBM Plex Sans",sans-serif; }
+
+  /* ---- function block ---- */
+  .fn{ border-top:1px solid var(--line-soft); padding-top:22px; margin-top:22px; }
+  .fn:first-of-type{ border-top:none; margin-top:8px; padding-top:0;}
+  .fn .sig{
+    display:inline-block; background:var(--surface-2); border:1px solid var(--line);
+    color:var(--accent-2-ink); font-size:14px; padding:3px 9px; border-radius:4px; margin-bottom:10px;
+  }
+
+  pre{
+    background:var(--code-bg); color:var(--code-fg); border:1px solid var(--code-line);
+    border-radius:8px; padding:16px 18px; overflow-x:auto; font-size:13.5px; line-height:1.6;
+    margin:0 0 16px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+  }
+  pre code{ background:none; padding:0; font-size:inherit; }
+  pre code.hljs{ background:none; }
+  .hljs-comment,.hljs-quote{ color:var(--code-comment); font-style:italic; }
+  .hljs-keyword,.hljs-built_in{ color:var(--code-keyword); }
+  .hljs-string{ color:var(--code-str); }
+  .hljs-title.function_,.hljs-title.class_{ color:var(--code-func); }
+  .hljs-number{ color:var(--code-num); }
+  .hljs-params{ color:var(--code-fg); }
+  .hljs-decorator{ color:var(--code-keyword); }
+
+  .callout{
+    border-left:3px solid var(--accent-2); background:color-mix(in srgb, var(--accent-2) 8%, var(--surface));
+    padding:12px 16px; border-radius:0 6px 6px 0; font-size:15px; margin:0 0 16px; color:var(--ink);
+  }
+  .callout.warn{ border-left-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, var(--surface)); }
+  .callout strong{ color:var(--ink); }
+
+  /* ---- tree ---- */
+  .tree{
+    background:var(--surface-2); border:1px solid var(--line); border-radius:8px;
+    padding:18px 22px; font-size:13.5px; line-height:1.85; overflow-x:auto; white-space:pre;
+  }
+  .tree .d{ color:var(--accent-2-ink); font-weight:600; }
+  .tree .c{ color:var(--ink-faint); }
+
+  /* ---- tables ---- */
+  .table-wrap{ overflow-x:auto; margin-bottom:20px; }
+  table{ border-collapse:collapse; width:100%; font-size:14.5px; background:var(--surface); }
+  th,td{ text-align:left; padding:9px 14px; border-bottom:1px solid var(--line-soft); }
+  th{ color:var(--ink-faint); font-weight:600; font-size:12.5px; text-transform:uppercase; letter-spacing:.04em; border-bottom:2px solid var(--line); }
+  td.mono, td .mono{ font-family:"IBM Plex Mono",monospace; font-size:13.5px; }
+  tr:last-child td{ border-bottom:none; }
+  td.status-pass{ color:var(--accent-2-ink); font-weight:600; }
+  .table-wrap table{ border:1px solid var(--line); border-radius:8px; overflow:hidden; box-shadow:var(--shadow); }
+
+  /* ---- diagram ---- */
+  .diagram-wrap{ background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:18px; overflow-x:auto; box-shadow:var(--shadow); margin-bottom:8px;}
+  .diagram-caption{ font-size:13px; color:var(--ink-faint); font-family:"IBM Plex Sans",sans-serif; margin:8px 2px 24px; }
+  svg text{ font-family:"IBM Plex Sans",sans-serif; }
+
+  /* ---- footer ---- */
+  footer{ border-top:1px solid var(--line); padding-top:24px; margin-top:60px; color:var(--ink-faint); font-size:13.5px; font-family:"IBM Plex Sans",sans-serif; }
+
+  @media (max-width: 880px){
+    .layout{ flex-direction:column; gap:0; padding:0 16px 60px; }
+    nav.toc{ position:static; width:100%; flex:none; max-height:none; padding:20px 0 10px; overflow:visible; }
+    nav.toc ol{ display:flex; flex-wrap:wrap; gap:2px 4px; border-left:none; }
+    nav.toc li{ }
+    nav.toc a{ border:1px solid var(--line); border-radius:14px; padding:5px 12px; font-size:12.5px; }
+    nav.toc a:hover{ border-color:var(--accent-2); }
+    main{ padding-top:8px; }
+    header.hero h1{ font-size:29px; }
+    .stat-row{ flex-wrap:wrap; }
+    .stat{ flex:1 1 45%; border-bottom:1px solid var(--line); }
+  }
+</style>
+
+<div class="layout">
+  <nav class="toc" aria-label="Table of contents">
+    <div class="brand">uav_sim &mdash; contents</div>
+    <ol>
+      <li><a href="#overview"><span class="num">00</span>Overview</a></li>
+      <li><a href="#architecture"><span class="num">01</span>System architecture</a></li>
+      <li><a href="#repo-structure"><span class="num">02</span>Repository structure</a></li>
+      <li><a href="#params"><span class="num">03</span>Physical parameters</a></li>
+      <li><a href="#dynamics"><span class="num">04</span>Equations of motion</a></li>
+      <li><a href="#actuator"><span class="num">05</span>Motor lag</a></li>
+      <li><a href="#plant"><span class="num">06</span>Plant &amp; integration</a></li>
+      <li><a href="#reference"><span class="num">07</span>Reference trajectories</a></li>
+      <li><a href="#controller"><span class="num">08</span>Cascaded controller</a></li>
+      <li><a href="#step"><span class="num">09</span>One simulation step</a></li>
+      <li><a href="#stability"><span class="num">10</span>Stability analysis</a></li>
+      <li><a href="#mixer"><span class="num">11</span>Mixer (reference-only)</a></li>
+      <li><a href="#validation"><span class="num">12</span>Validation &amp; tests</a></li>
+      <li><a href="#errata"><span class="num">13</span>Report errata found</a></li>
+      <li><a href="#running"><span class="num">14</span>Running it</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <header class="hero" id="overview">
+      <div class="eyebrow">Code structure walkthrough</div>
+      <h1>uav_sim: architecture and mathematical modeling</h1>
+      <p class="lede">A from-scratch Python plant model and controller for the Crazyflie&nbsp;2.1 quadrotor, built to faithfully reproduce the equations and gains in Ian Snider's WashU ESE&nbsp;4481 report &mdash; then corrected, tested, and extended into a working flight simulator. This document walks through every module, every function, and how a reference trajectory turns into a flown 3D path.</p>
+      <div class="stat-row">
+        <div class="stat"><div class="stat-num">8</div><div class="stat-label">source modules</div></div>
+        <div class="stat"><div class="stat-num">12</div><div class="stat-label">state variables</div></div>
+        <div class="stat"><div class="stat-num">21</div><div class="stat-label">passing tests</div></div>
+        <div class="stat"><div class="stat-num">7</div><div class="stat-label">report bugs found</div></div>
+      </div>
+    </header>
+
+    <section id="architecture">
+      <div class="num-heading"><span class="n">01</span><h2>System architecture</h2></div>
+      <p class="section-sub">Two independent pieces, wired together by whatever script is driving the simulation &mdash; not by a fixed framework.</p>
+
+      <p>The design keeps the <strong>plant</strong> (the physics: how the drone actually moves) and the <strong>controller</strong> (the PID/PD logic that decides what to command) as two separate objects that know nothing about each other's internals. A simulation script &mdash; a test, an animation, a validation check &mdash; owns the loop and passes data between them every timestep. This mirrors how you'd wire a real flight controller to a real airframe: the controller reads sensor state and writes actuator commands; it doesn't know or care that "the airframe" is, in this case, a Python object solving an ODE.</p>
+
+      <div class="diagram-wrap">
+        <svg viewBox="0 0 980 300" width="100%" role="img" aria-labelledby="arch-svg-title">
+          <title id="arch-svg-title">Block diagram: reference generator, controller, motor lag, and rigid-body dynamics, with state fed back into the controller</title>
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--ink-soft)"></path>
+            </marker>
+          </defs>
+
+          <!-- REFERENCE -->
+          <rect x="20" y="30" width="168" height="66" rx="6" fill="var(--surface)" stroke="var(--line)" stroke-width="1.5"></rect>
+          <text x="104" y="52" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">REFERENCE</text>
+          <text x="104" y="68" text-anchor="middle" font-size="11" fill="var(--ink-faint)">reference.py</text>
+          <text x="104" y="82" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--accent-2-ink)">hover() / circle()</text>
+
+          <!-- arrow to controller -->
+          <path d="M188,63 H262" stroke="var(--ink-soft)" stroke-width="1.5" fill="none" marker-end="url(#arrow)"></path>
+          <text x="225" y="54" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">ref6</text>
+
+          <!-- CONTROLLER -->
+          <rect x="262" y="20" width="200" height="150" rx="6" fill="var(--surface)" stroke="var(--accent-2)" stroke-width="2"></rect>
+          <text x="362" y="42" text-anchor="middle" font-size="12.5" font-weight="700" fill="var(--ink)">CONTROLLER</text>
+          <text x="362" y="58" text-anchor="middle" font-size="11" fill="var(--ink-faint)">controller.py</text>
+          <text x="362" y="76" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--accent-2-ink)">CascadedController</text>
+          <text x="362" y="92" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--accent-2-ink)">.compute(state12, ref6)</text>
+          <line x1="282" y1="104" x2="442" y2="104" stroke="var(--line)"></line>
+          <text x="362" y="122" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">outer PID &rarr; tilt angle</text>
+          <text x="362" y="138" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">inner PD &rarr; torque</text>
+          <text x="362" y="156" text-anchor="middle" font-size="10" fill="var(--ink-faint)">returns u_cmd</text>
+
+          <!-- arrow to plant -->
+          <path d="M462,95 H556" stroke="var(--ink-soft)" stroke-width="1.5" fill="none" marker-end="url(#arrow)"></path>
+          <text x="509" y="86" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">[Z,L,M,N]</text>
+
+          <!-- PLANT outer dashed -->
+          <rect x="556" y="30" width="404" height="150" rx="8" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="5 4"></rect>
+          <text x="576" y="20" font-size="11" font-weight="700" fill="var(--accent-ink)">PLANT &mdash; plant.py: CrazyflieSim (16-state augmented, integrated together via RK4)</text>
+
+          <!-- MOTOR LAG -->
+          <rect x="576" y="60" width="150" height="80" rx="6" fill="var(--surface)" stroke="var(--line)" stroke-width="1.5"></rect>
+          <text x="651" y="82" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">MOTOR LAG</text>
+          <text x="651" y="98" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">actuator.py</text>
+          <text x="651" y="114" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--accent-2-ink)">lag_deriv()</text>
+          <text x="651" y="129" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">H(s)=10/(s+10)</text>
+
+          <!-- arrow -->
+          <path d="M726,100 H772" stroke="var(--ink-soft)" stroke-width="1.5" fill="none" marker-end="url(#arrow)"></path>
+
+          <!-- DYNAMICS -->
+          <rect x="772" y="60" width="168" height="80" rx="6" fill="var(--surface)" stroke="var(--line)" stroke-width="1.5"></rect>
+          <text x="856" y="82" text-anchor="middle" font-size="12" font-weight="700" fill="var(--ink)">DYNAMICS</text>
+          <text x="856" y="98" text-anchor="middle" font-size="10.5" fill="var(--ink-faint)">dynamics.py</text>
+          <text x="856" y="114" text-anchor="middle" font-size="10.5" font-family="IBM Plex Mono, monospace" fill="var(--accent-2-ink)">rigid_body_deriv()</text>
+          <text x="856" y="129" text-anchor="middle" font-size="9.5" fill="var(--ink-faint)">12-state nonlinear EOM</text>
+
+          <!-- output arrow down and around -->
+          <path d="M856,140 V220 H262 V170" stroke="var(--ink-soft)" stroke-width="1.5" fill="none" marker-end="url(#arrow)"></path>
+          <text x="559" y="234" text-anchor="middle" font-size="11" font-family="IBM Plex Mono, monospace" fill="var(--ink-faint)">state x &mdash; fed back into the controller every step</text>
+          <text x="856" y="234" text-anchor="middle" font-size="10" fill="var(--ink-faint)">&larr; RK4 integrates</text>
+          <text x="856" y="248" text-anchor="middle" font-size="10" fill="var(--ink-faint)">the derivative over dt</text>
+        </svg>
+      </div>
+      <p class="diagram-caption">The controller and the plant are separate objects; a driving script (a test, <code>animate_flight_3d.py</code>, etc.) owns the loop that connects them &mdash; see &sect;09.</p>
+
+      <p>Three design choices fall out of this separation:</p>
+      <ul>
+        <li><strong>The plant never imports the controller.</strong> <code>CrazyflieSim.step()</code> just takes a raw <code>[Z,L,M,N]</code> vector. It has no idea a PID loop produced it &mdash; you could drive it with a hand-typed constant, a neural net, or a joystick.</li>
+        <li><strong>Motor lag and rigid-body dynamics are integrated together, not chained.</strong> <code>plant.py</code> concatenates the 12 rigid-body states and the 4 actuator-lag states into one 16-vector and runs a single RK4 step over both (&sect;06) &mdash; avoiding the small error you'd get from integrating one, then the other, in sequence (operator-splitting error).</li>
+        <li><strong>The mixer (motor RPM &harr; PWM) is deliberately absent from this loop.</strong> The report's own MATLAB simulation feeds <code>[Z,L,M,N]</code> straight into the dynamics too (Listing&nbsp;4); the mixer is a firmware-only concern (&sect;11).</li>
+      </ul>
+    </section>
+
+    <section id="repo-structure">
+      <div class="num-heading"><span class="n">02</span><h2>Repository structure</h2></div>
+      <p class="section-sub">Everything lives under <code>uav_sim/</code>, split into the model itself, unit tests, and a second layer of deeper validation.</p>
+      <div class="tree">uav_sim/
+<span class="c">├──</span> <span class="d">src/</span>                         <span class="c"># the model &mdash; &sect;03&ndash;11</span>
+<span class="c">│   ├──</span> params.py                 CrazyflieParams, Gammas, compute_gammas()
+<span class="c">│   ├──</span> dynamics.py               rotation_body_to_earth(), rigid_body_deriv()
+<span class="c">│   ├──</span> actuator.py               lag_deriv()
+<span class="c">│   ├──</span> plant.py                  augmented_deriv(), rk4_step(), CrazyflieSim
+<span class="c">│   ├──</span> reference.py              hover(), circle()
+<span class="c">│   ├──</span> controller.py             ControllerGains, CascadedController
+<span class="c">│   ├──</span> stability_analysis.py     open-loop transfer functions, margins
+<span class="c">│   └──</span> mixer.py                  MIXER, MIXER_INV (reference-only)
+<span class="c">├──</span> <span class="d">tests/</span>                        <span class="c"># fast unit tests &mdash; &sect;12</span>
+<span class="c">│   ├──</span> test_gammas.py
+<span class="c">│   ├──</span> test_hover.py
+<span class="c">│   ├──</span> test_singularity.py
+<span class="c">│   └──</span> test_step_response.py
+<span class="c">├──</span> <span class="d">validation_tests/</span>             <span class="c"># deeper checks + animations &mdash; &sect;12</span>
+<span class="c">│   ├──</span> test_closed_form.py       free-fall, motor-lag exponential, trim check
+<span class="c">│   ├──</span> test_convergence.py       RK4 4th-order convergence
+<span class="c">│   ├──</span> test_conservation.py      torque-free energy / angular-momentum
+<span class="c">│   ├──</span> test_cross_validation.py  vs. scipy.integrate.solve_ivp
+<span class="c">│   ├──</span> test_fuzz.py              100 random control episodes
+<span class="c">│   ├──</span> test_stability_margins.py vs. the report's own Section 6
+<span class="c">│   ├──</span> test_closed_loop_reproduction.py
+<span class="c">│   ├──</span> reproduce_snider_figures.py
+<span class="c">│   ├──</span> visualize_trajectory.py
+<span class="c">│   ├──</span> animate_flight_3d.py       100s hover flight &rarr; 3D animation
+<span class="c">│   ├──</span> animate_flight_3d_circle.py 100s circle flight &rarr; 3D animation
+<span class="c">│   └──</span> plots/                    generated PNG / MP4 output
+<span class="c">├──</span> CHANGELOG.md                 <span class="c"># every deviation from the PDF, dated &amp; reasoned</span>
+<span class="c">└──</span> requirements.txt              numpy, scipy, matplotlib, control, pytest</div>
+    </section>
+
+    <section id="params">
+      <div class="num-heading"><span class="n">03</span><h2>Physical parameters</h2></div>
+      <p class="section-sub">Where every number in the equations of motion comes from.</p>
+      <div class="file-card"><span class="path">src/params.py</span><span class="desc">mass, inertia, and the &Gamma; (gamma) coefficients the rotational equations are written in terms of</span></div>
+
+      <p>The mass and full inertia matrix are copied from the report's own Eq.&nbsp;4 &mdash; not the Bitcraze datasheet, not another simulator's estimate &mdash; so this model reproduces the same numbers the report itself simulated with.</p>
+
+      <div class="fn">
+        <span class="sig">class CrazyflieParams</span>
+        <pre><code class="language-python">@dataclass(frozen=True)
+class CrazyflieParams:
+    mass: float = 0.033  # kg
+    g: float = 9.81  # m/s^2
+
+    # Inertia matrix, Eq. 4 [kg*m^2].
+    Jxx: float = 16.571710e-6
+    Jyy: float = 16.655602e-6
+    Jzz: float = 29.261652e-6
+    Jxy: float = 0.830806e-6  # reference only; dropped by the gamma reduction below
+    Jyz: float = 1.800197e-6  # reference only; dropped by the gamma reduction below
+    Jxz: float = 0.718277e-6  # used by the gamma reduction below
+
+    tau_motor: float = 0.1  # s; H(s) = 10/(s+10), Eq. 13
+
+    @property
+    def J_full(self) -> np.ndarray:
+        """Full symmetric inertia matrix, Eq. 4. Reference only -- the equations
+        of motion use only Jxx, Jyy, Jzz, Jxz via the gamma reduction below."""
+        return np.array([
+            [self.Jxx, self.Jxy, self.Jxz],
+            [self.Jxy, self.Jyy, self.Jyz],
+            [self.Jxz, self.Jyz, self.Jzz],
+        ])</code></pre>
+        <p>A frozen (immutable) dataclass, so an instance can be passed around and shared safely &mdash; nothing downstream can accidentally mutate the drone's mass mid-simulation. <code>J_full</code> reconstructs the printed 3&times;3 inertia matrix for reference/display; the actual equations of motion never touch it directly (see the &Gamma; reduction below), which is exactly what the report itself does when it drops the cross terms <code>Jxy</code>, <code>Jyz</code>.</p>
+      </div>
+
+      <div class="fn">
+        <span class="sig">compute_gammas(p) -&gt; Gammas</span>
+        <pre><code class="language-python">def compute_gammas(p: CrazyflieParams) -> Gammas:
+    denom = p.Jxx * p.Jzz - p.Jxz ** 2
+    return Gammas(
+        g1=p.Jxz * (p.Jxx - p.Jyy + p.Jzz) / denom,
+        g2=(p.Jzz * (p.Jzz - p.Jyy) + p.Jxz ** 2) / denom,
+        g3=p.Jzz / denom,
+        g4=p.Jxz / denom,
+        g5=(p.Jzz - p.Jxx) / p.Jyy,
+        g6=p.Jxz / p.Jyy,
+        g7=((p.Jxx - p.Jyy) * p.Jxx + p.Jxz ** 2) / denom,
+        g8=p.Jxx / denom,
+    )</code></pre>
+        <p>This is the standard aircraft-dynamics inertia reduction (the same one used in Beard &amp; McLain's UAV textbook, which the report's own rotational equations are structurally copied from): instead of inverting the full 3&times;3 inertia matrix inside the simulation loop every step, you invert it once, symbolically, into 8 scalar constants <code>g1&hellip;g8</code>, and the rotational equations (&sect;04) become simple products of those constants with the angular rates. <code>Gammas</code> is just a small frozen dataclass holding the 8 numbers.</p>
+        <p class="callout warn"><strong>Found a bug here:</strong> the report's own MATLAB literally computes <code>gamma = Jx*Jy - Jxz^2</code>, but every other formula that divides by it (<code>g1, g3, g4, g7, g8</code>) is only dimensionally/physically consistent with the standard <code>Jx*Jz - Jxz^2</code>. The two denominators differ by ~76% for this airframe (Jzz is nearly double Jxx/Jyy). Treated as a typo; the corrected <code>Jxx*Jzz</code> form is what's implemented above.</p>
+      </div>
+    </section>
+
+    <section id="dynamics">
+      <div class="num-heading"><span class="n">04</span><h2>Equations of motion</h2></div>
+      <p class="section-sub">The 12-state nonlinear model the entire simulator is built on.</p>
+      <div class="file-card"><span class="path">src/dynamics.py</span><span class="desc">rigid-body kinematics and dynamics &mdash; the physics the drone obeys, independent of any controller</span></div>
+
+      <p>The state vector is 12 numbers. Positions are in the earth (world) frame; velocities are in the <em>body</em> frame &mdash; i.e. "forward/right/down relative to the drone," not "east/north/up":</p>
+      <div class="table-wrap"><table>
+        <tr><th>Index</th><th>Symbol</th><th>Meaning</th><th>Units</th></tr>
+        <tr><td class="mono">0&ndash;2</td><td class="mono">px, py, pz</td><td>position, earth frame</td><td>m</td></tr>
+        <tr><td class="mono">3&ndash;5</td><td class="mono">u, v, w</td><td>velocity, <strong>body</strong> frame</td><td>m/s</td></tr>
+        <tr><td class="mono">6&ndash;8</td><td class="mono">&phi;, &theta;, &psi;</td><td>roll, pitch, yaw (ZYX Euler)</td><td>rad</td></tr>
+        <tr><td class="mono">9&ndash;11</td><td class="mono">p, q, r</td><td>body angular rates</td><td>rad/s</td></tr>
+      </table></div>
+      <p>The input is 4 numbers: <code class="mono">[Z, L, M, N]</code> &mdash; upward thrust in newtons, and roll/pitch/yaw moments in newton&middot;metres.</p>
+
+      <div class="fn">
+        <span class="sig">rotation_body_to_earth(phi, theta, psi) -&gt; 3&times;3</span>
+        <pre><code class="language-python">def rotation_body_to_earth(phi: float, theta: float, psi: float) -> np.ndarray:
+    """R = Rz(psi) @ Ry(theta) @ Rx(phi), body-frame vector -> earth frame."""
+    cphi, sphi = np.cos(phi), np.sin(phi)
+    ctheta, stheta = np.cos(theta), np.sin(theta)
+    cpsi, spsi = np.cos(psi), np.sin(psi)
+
+    Rz = np.array([[cpsi, -spsi, 0.0], [spsi, cpsi, 0.0], [0.0, 0.0, 1.0]])
+    Ry = np.array([[ctheta, 0.0, stheta], [0.0, 1.0, 0.0], [-stheta, 0.0, ctheta]])
+    Rx = np.array([[1.0, 0.0, 0.0], [0.0, cphi, -sphi], [0.0, sphi, cphi]])
+    return Rz @ Ry @ Rx</code></pre>
+        <p>The standard yaw&rarr;pitch&rarr;roll (ZYX) rotation matrix. Multiplying this by a body-frame vector (like the body velocity <code class="mono">[u,v,w]</code>) rotates it into earth-frame coordinates &mdash; used both for the position kinematics below and inside the controller (&sect;08) to convert body velocity into an earth-frame velocity the outer position loop can compare against a world-frame reference.</p>
+      </div>
+
+      <div class="fn">
+        <span class="sig">rigid_body_deriv(state12, u4_actual, params, gammas) -&gt; 12-vector</span>
+        <pre><code class="language-python">def rigid_body_deriv(state12, u4_actual, params, gammas):
+    u, v, w = state12[3], state12[4], state12[5]
+    phi, theta, psi = state12[6], state12[7], state12[8]
+    p, q, r = state12[9], state12[10], state12[11]
+    Z, L, M, N = u4_actual
+
+    R = rotation_body_to_earth(phi, theta, psi)
+    p_dot_earth = R @ np.array([u, v, w])
+
+    cphi, sphi = np.cos(phi), np.sin(phi)
+    ctheta, ttheta = np.cos(theta), np.tan(theta)
+    stheta = np.sin(theta)
+
+    uvw_dot = np.array([
+        r * v - q * w + params.g * stheta,
+        p * w - r * u - params.g * sphi * ctheta,
+        q * u - p * v + Z / params.mass - params.g * cphi * ctheta,
+    ])
+
+    euler_kinematics = np.array([
+        [1.0, sphi * ttheta, cphi * ttheta],
+        [0.0, cphi, -sphi],
+        [0.0, sphi / ctheta, cphi / ctheta],
+    ])
+    euler_dot = euler_kinematics @ np.array([p, q, r])
+
+    pqr_dot = np.array([
+        gammas.g1 * p * q - gammas.g2 * q * r + gammas.g3 * L + gammas.g4 * N,
+        gammas.g5 * p * r - gammas.g6 * (p ** 2 - r ** 2) + M / params.Jyy,
+        gammas.g7 * p * q - gammas.g1 * q * r + gammas.g4 * L + gammas.g8 * N,
+    ])
+
+    return np.concatenate([p_dot_earth, uvw_dot, euler_dot, pqr_dot])</code></pre>
+        <p>One function, four physical ideas stacked together, returning the time-derivative of all 12 states at once (this is what gets numerically integrated in &sect;06):</p>
+        <ul>
+          <li><strong>Position kinematics</strong> (<code>p_dot_earth</code>) &mdash; rotate the body velocity into earth frame. This is just kinematics: "how fast is the drone moving in world coordinates, given how fast it's moving in its own frame and how it's tilted."</li>
+          <li><strong>Translational dynamics</strong> (<code>uvw_dot</code>) &mdash; Newton's second law in the rotating body frame: the Coriolis-like cross terms (<code>rv-qw</code>, etc.) plus thrust along the body z-axis, plus gravity distributed across all three body axes by how much the drone is tilted (<code>g&middot;sin&theta;</code>, <code>-g&middot;sin&phi;cos&theta;</code>, <code>-g&middot;cos&phi;cos&theta;</code>).</li>
+          <li><strong>Attitude kinematics</strong> (<code>euler_dot</code>) &mdash; converts body angular rates into the rate of change of the Euler angles themselves. Note the <code>1/cos(theta)</code> terms: this blows up at &theta;&nbsp;=&nbsp;&plusmn;90&deg;, a real, known singularity of Euler angles (called gimbal lock) &mdash; deliberately left unhandled and documented, not silently patched.</li>
+          <li><strong>Rotational dynamics</strong> (<code>pqr_dot</code>) &mdash; Euler's rigid-body equations, rewritten in terms of the 8 &Gamma; constants from &sect;03 instead of the raw inertia matrix.</li>
+        </ul>
+        <p class="callout warn"><strong>The most consequential bug found in the whole report</strong> was in this function's translational-dynamics line. The report's own printed equation only ever subtracts <code>mg</code> from the body-z component &mdash; it never rotates gravity into the other two body axes. That's the equation for a level, non-tilted drone; presented as if general, it means a tilted drone in the report's own model produces <em>zero</em> horizontal acceleration. Since a quadrotor can only move sideways by tilting and letting gravity pull it that way, this silently broke the entire underactuated flight mechanism the controller depends on. Confirmed experimentally (holding a 14&deg; pitch at rest, in the un-fixed model, produced literally 0.0000 horizontal acceleration) before the <code>g&middot;sin&theta;</code> / <code>-g&middot;sin&phi;cos&theta;</code> terms above were added.</p>
+      </div>
+    </section>
+
+    <section id="actuator">
+      <div class="num-heading"><span class="n">05</span><h2>Motor lag</h2></div>
+      <p class="section-sub">A motor can't change thrust instantly &mdash; this is the one-line model of that delay.</p>
+      <div class="file-card"><span class="path">src/actuator.py</span><span class="desc">first-order actuator dynamics between "commanded" and "actual" [Z,L,M,N]</span></div>
+      <div class="fn">
+        <span class="sig">lag_deriv(lag_state4, u4_cmd, tau) -&gt; 4-vector</span>
+        <pre><code class="language-python">def lag_deriv(lag_state4: np.ndarray, u4_cmd: np.ndarray, tau: float) -> np.ndarray:
+    """d(actual)/dt for the first-order lag: actual -> cmd with time constant tau."""
+    return (u4_cmd - lag_state4) / tau</code></pre>
+        <p>This is the differential-equation form of a classic first-order low-pass filter, <code>H(s) = 1/(&tau;s+1)</code>. With <code>&tau;=0.1s</code> (from the report's Eq.&nbsp;13, <code>H(s)=10/(s+10)</code>), the actual thrust/torque chases whatever the controller just commanded, but takes about a tenth of a second to catch up &mdash; a small, honest stand-in for real motor and propeller inertia. It's applied identically to all four channels (<code>Z, L, M, N</code>) at once, as four extra state variables layered on top of the 12 rigid-body ones (&sect;06).</p>
+      </div>
+    </section>
+
+    <section id="plant">
+      <div class="num-heading"><span class="n">06</span><h2>Plant &amp; integration</h2></div>
+      <p class="section-sub">Where the equations of motion and the motor lag get glued together and stepped forward in time.</p>
+      <div class="file-card"><span class="path">src/plant.py</span><span class="desc">RK4 integration of the combined 16-state system, wrapped in a gym-like <code>CrazyflieSim</code></span></div>
+
+      <div class="fn">
+        <span class="sig">augmented_deriv(x16, u_cmd4, params, gammas) -&gt; 16-vector</span>
+        <pre><code class="language-python">def augmented_deriv(x16, u_cmd4, params, gammas):
+    """dstate/dt for the 16-state [rigid_body(12), actuator_lag(4)] system."""
+    state12, lag4 = x16[:STATE_DIM], x16[STATE_DIM:]
+    return np.concatenate([
+        rigid_body_deriv(state12, lag4, params, gammas),
+        lag_deriv(lag4, u_cmd4, params.tau_motor),
+    ])</code></pre>
+        <p>Bolts the 12 physics states and the 4 actuator-lag states into one 16-vector. Notice the wiring: the <em>rigid body</em> reads its input force/torque from <code>lag4</code> (the actuator's current, lagged output) &mdash; not from the raw command. The raw command <code>u_cmd4</code> only drives the lag's own derivative. This is what "the motor hasn't caught up yet" looks like in code.</p>
+      </div>
+
+      <div class="fn">
+        <span class="sig">rk4_step(f, x, u, dt, *args) -&gt; new state</span>
+        <pre><code class="language-python">def rk4_step(f, x, u, dt, *args):
+    """Classic 4th-order Runge-Kutta step for dx/dt = f(x, u, *args)."""
+    k1 = f(x, u, *args)
+    k2 = f(x + 0.5 * dt * k1, u, *args)
+    k3 = f(x + 0.5 * dt * k2, u, *args)
+    k4 = f(x + dt * k3, u, *args)
+    return x + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)</code></pre>
+        <p>A textbook 4th-order Runge&ndash;Kutta step, generic over whatever derivative function <code>f</code> you hand it (here, always <code>augmented_deriv</code>). It samples the derivative four times across the timestep and combines them in the classic <code>1:2:2:1</code> weighting &mdash; far more accurate per step than the report's own simple forward-Euler (<code>x&nbsp;=&nbsp;x&nbsp;+&nbsp;xdot&middot;dt</code>), at the cost of four function evaluations instead of one. Verified in <code>test_convergence.py</code>: halving the step size cuts the error by ~16&times;, exactly the theoretical 2<sup>4</sup> for a 4th-order method.</p>
+      </div>
+
+      <div class="fn">
+        <span class="sig">class CrazyflieSim</span>
+        <pre><code class="language-python">class CrazyflieSim:
+    """Gym-like plant simulator: instantiate, then call .step(u_cmd, dt)
+    repeatedly with commanded [Z, L, M, N]. Build a controller around this."""
+
+    def __init__(self, params=None, x0=None):
+        self.params = params if params is not None else CrazyflieParams()
+        self.gammas = compute_gammas(self.params)
+        if x0 is None:
+            x0 = np.zeros(STATE_DIM)
+        elif x0.shape != (STATE_DIM,):
+            raise ValueError(f"x0 must have shape ({STATE_DIM},), got {x0.shape}")
+        # Actuator lag states start settled at hover thrust, zero moments.
+        lag0 = np.array([self.params.mass * self.params.g, 0.0, 0.0, 0.0])
+        self._x16 = np.concatenate([x0, lag0])
+
+    def step(self, u_cmd, dt=0.002):
+        """Advance the plant by dt under commanded [Z, L, M, N]. Returns the
+        new 12-vector rigid-body state."""
+        u_cmd = np.asarray(u_cmd, dtype=float)
+        if u_cmd.shape != (ACTUATOR_DIM,):
+            raise ValueError(f"u_cmd must have shape ({ACTUATOR_DIM},), got {u_cmd.shape}")
+        self._x16 = rk4_step(augmented_deriv, self._x16, u_cmd, dt, self.params, self.gammas)
+        return self.state
+
+    @property
+    def state(self):
+        return self._x16[:STATE_DIM].copy()
+
+    @property
+    def actuator_state(self):
+        return self._x16[STATE_DIM:].copy()</code></pre>
+        <p>This is the public face of the whole physics model &mdash; everything above it is an implementation detail. Three things worth noticing:</p>
+        <ul>
+          <li><strong>It's stateful and minimal</strong>, deliberately shaped like an OpenAI-Gym environment: construct it once, then call <code>.step(u_cmd, dt)</code> in a loop. No controller, no reference trajectory, no notion of a "mission" lives in this class.</li>
+          <li><strong>The actuator lag starts pre-settled at hover thrust</strong> (<code>lag0</code>), not zero &mdash; so a freshly constructed sim doesn't begin with a sudden thrust jump from 0 to hover.</li>
+          <li><strong><code>.state</code> and <code>.actuator_state</code> return copies</strong>, not references into the internal array &mdash; a caller can't accidentally corrupt the simulation's internal state by mutating what it reads back.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="reference">
+      <div class="num-heading"><span class="n">07</span><h2>Reference trajectories</h2></div>
+      <p class="section-sub">This is the answer to "how is the reference input set" &mdash; a plain function of time, called once per control step.</p>
+      <div class="file-card"><span class="path">src/reference.py</span><span class="desc">time-varying setpoint generators</span></div>
+      <p>Every reference generator returns the same 6-number shape: <code class="mono">ref6&nbsp;=&nbsp;[px_c, py_c, pz_c, vx_c, vy_c, vz_c]</code>, a target position <em>and</em> velocity in the earth frame. Handing the controller the target velocity too &mdash; not just position &mdash; matters: for a moving target like a circle, the outer loop no longer has to infer the target's speed purely from a shrinking position error; it's told directly.</p>
+      <div class="fn">
+        <span class="sig">hover(t, x=0, y=0, z=0.5) -&gt; ref6</span>
+        <pre><code class="language-python">def hover(t: float, x: float = 0.0, y: float = 0.0, z: float = 0.5) -> np.ndarray:
+    return np.array([x, y, z, 0.0, 0.0, 0.0])</code></pre>
+        <p>The trivial case &mdash; stand still at a point. Ignores <code>t</code> entirely; it's accepted only so <code>hover</code> and <code>circle</code> share one call signature.</p>
+      </div>
+      <div class="fn">
+        <span class="sig">circle(t, radius=1.0, z=10.0, omega=0.5, center_x=0, center_y=0) -&gt; ref6</span>
+        <pre><code class="language-python">def circle(t, radius=1.0, z=10.0, omega=0.5, center_x=0.0, center_y=0.0):
+    px_c = center_x + radius * np.cos(omega * t)
+    py_c = center_y + radius * np.sin(omega * t)
+    vx_c = -radius * omega * np.sin(omega * t)
+    vy_c = radius * omega * np.cos(omega * t)
+    return np.array([px_c, py_c, z, vx_c, vy_c, 0.0])</code></pre>
+        <p>Parametric circle: position is the usual <code>(r&middot;cos&omega;t, r&middot;sin&omega;t)</code>, and velocity is its exact analytic derivative &mdash; the tangential velocity of a point going around that circle at rate <code>&omega;</code>. A driving script calls <code>circle(t, &hellip;)</code> fresh every timestep with the current simulation time, so the target sweeps continuously; nothing here is stateful.</p>
+        <p class="callout"><strong>Picking &omega; is a controls decision, not just a kinematics one.</strong> Two separate limits apply: the tilt angle needed to hold a circle (&asymp; &omega;&sup2;&middot;radius/g) has to stay small for the small-angle assumptions in &sect;08 to hold, <em>and</em> &omega; has to sit comfortably below the outer loop's own control bandwidth or the drone simply can't keep up with the moving target regardless of tilt limits. <code>&omega;=0.125&nbsp;rad/s</code> (2 laps in 100s) was chosen for exactly this reason &mdash; see &sect;08's outer-loop bandwidth and &sect;13.</p>
+      </div>
+    </section>
+
+    <section id="controller">
+      <div class="num-heading"><span class="n">08</span><h2>Cascaded controller</h2></div>
+      <p class="section-sub">Turns "where do I want to be" into "how hard should each motor push."</p>
+      <div class="file-card"><span class="path">src/controller.py</span><span class="desc">the report's Section 5 cascaded PID/PD architecture</span></div>
+
+      <p>Four independent control channels, matching the report's Section&nbsp;5:</p>
+      <ul>
+        <li><strong>Z (thrust)</strong> &mdash; a single PD loop on altitude. No integral term: gravity itself provides the steady-state force, so there's no steady-state error to eliminate.</li>
+        <li><strong>N (yaw)</strong> &mdash; a single PD loop holding &psi;&nbsp;=&nbsp;0.</li>
+        <li><strong>L (roll) and M (pitch)</strong> &mdash; <em>cascaded</em>: an outer PID on lateral position/velocity error produces a small commanded tilt angle (this is the tilt-to-translate relationship from &sect;04 read backwards &mdash; "if I want to accelerate sideways, I need to tilt by about this much"), which an inner, much faster PD loop then tracks by commanding a torque.</li>
+      </ul>
+
+      <div class="fn">
+        <span class="sig">class ControllerGains</span>
+        <pre><code class="language-python">@dataclass(frozen=True)
+class ControllerGains:
+    k_pz: float = 0.297
+    k_dz: float = 0.198
+
+    k_pphi: float = 1.4914539e-4
+    k_dphi: float = 1.19316312e-4
+    k_ptheta: float = 1.499004180e-4
+    k_dtheta: float = 1.499004180e-4
+    k_ppsi: float = 1.82885325e-4
+    k_dpsi: float = 1.75569912e-4
+
+    k_px: float = 0.2
+    k_ix: float = 0.1
+    k_dx: float = 0.1
+    k_py: float = 0.2
+    k_iy: float = 0.1
+    k_dy: float = 0.1
+
+    N_filter: float = 10.0</code></pre>
+        <p>One dataclass, 15 numbers, all 12 loop gains plus the derivative-filter coefficient. The defaults are the report's own "Simulation" column from Table&nbsp;1 &mdash; kept as the default specifically so the historical Fig.&nbsp;12 reproduction still works out of the box. The <code>k_px/k_iy/k_dx</code>&hellip; outer position gains are Snider's own manually-tuned values; as &sect;13 explains, they turned out to be unusable once the gravity-distribution bug was fixed.</p>
+      </div>
+
+      <div class="fn">
+        <span class="sig">gains_from_report_design_parameters(params) -&gt; ControllerGains</span>
+        <pre><code class="language-python">def gains_from_report_design_parameters(params):
+    zeta_z, wn_z = 1.0, 3.0
+    zeta_roll, wn_roll = 1.2, 3.0
+    zeta_pitch, wn_pitch = 1.5, 3.0
+    zeta_yaw, wn_yaw = 1.2, 2.5
+    return ControllerGains(
+        k_pz=params.mass * wn_z ** 2,
+        k_dz=params.mass * 2 * zeta_z * wn_z,
+        k_pphi=params.Jxx * wn_roll ** 2,
+        k_dphi=params.Jxx * 2 * zeta_roll * wn_roll,
+        k_ptheta=params.Jyy * wn_pitch ** 2,
+        k_dtheta=params.Jyy * 2 * zeta_pitch * wn_pitch,
+        k_ppsi=params.Jzz * wn_yaw ** 2,
+        k_dpsi=params.Jzz * 2 * zeta_yaw * wn_yaw,
+    )</code></pre>
+        <p>Rather than hardcoding gain numbers, this rebuilds them from the underlying design intent: a desired natural frequency <code>&omega;n</code> and damping ratio <code>&zeta;</code> per axis, using the standard 2nd-order pole-placement formulas <code>k_p=J&middot;&omega;n&sup2;</code>, <code>k_d=J&middot;2&zeta;&omega;n</code>. This is how the report itself explains its gain selection (Section&nbsp;5.2) &mdash; this function makes that derivation executable instead of just prose, and doubles as the fix for Table&nbsp;1's <code>k_pphi</code> typo (&sect;13), since it's computed here, not copied from the table.</p>
+      </div>
+
+      <div class="fn">
+        <span class="sig">gains_pole_placement_outer(params, base=None, wn_outer=0.6, zeta_outer=1.0) -&gt; ControllerGains</span>
+        <pre><code class="language-python">def gains_pole_placement_outer(params, base=None, wn_outer=0.6, zeta_outer=1.0):
+    if base is None:
+        base = gains_from_report_design_parameters(params)
+    kp = wn_outer ** 2 / params.g
+    ki = wn_outer ** 3 / params.g
+    kd = 2 * zeta_outer * wn_outer / params.g
+    return dataclasses.replace(base, k_px=kp, k_ix=ki, k_dx=kd, k_py=kp, k_iy=ki, k_dy=kd)</code></pre>
+        <p>A from-scratch redesign of the outer x/y position loop, written after fixing the gravity bug in &sect;04. The elegance here is that the outer PID's own gain formula (<code>k_p=&omega;n&sup2;/g</code>, <code>k_i=&omega;n&sup3;/g</code>, <code>k_d=2&zeta;&omega;n/g</code>) exactly cancels the <code>g/s&sup2;</code> relationship between a commanded tilt angle and the resulting position, leaving a clean closed-loop characteristic polynomial <code>s&sup3;+2&zeta;&omega;n&middot;s&sup2;+&omega;n&sup2;&middot;s+&omega;n&sup3;=0</code> that no longer depends on <code>g</code> at all. <code>&omega;n=0.6&nbsp;rad/s, &zeta;=1.0</code> keeps this outer loop comfortably slower (5&times;) than the inner attitude loop's <code>&omega;n=3&nbsp;rad/s</code>, which cascaded control requires for the two loops not to fight each other.</p>
+      </div>
+
+      <div class="fn">
+        <span class="sig">CascadedController.__init__(params, gains, dt, integral_clamp)</span>
+        <pre><code class="language-python">def __init__(self, params=None, gains=None, dt=0.002, integral_clamp=None):
+    self.params = params if params is not None else CrazyflieParams()
+    self.gains = gains if gains is not None else ControllerGains()
+    self.dt = dt
+    self.integral_clamp = integral_clamp
+    self.integral_x = 0.0
+    self.integral_y = 0.0
+    self.filtered_e_vx = 0.0
+    self.filtered_e_vy = 0.0
+    self._alpha = self.gains.N_filter * dt / (1.0 + self.gains.N_filter * dt)</code></pre>
+        <p>The controller is a small state machine: it remembers its two position-error integrals and two filtered-derivative values between calls (that's <em>why</em> it's a class and not a bare function &mdash; a PID's I and filtered-D terms only make sense as a running history). <code>integral_clamp</code> is an opt-in anti-windup limit, off by default (<code>None</code>) to match the report's own controller exactly &mdash; see &sect;13 for why leaving it off is fine for a 10s run but not a 100s one.</p>
+      </div>
+
+      <div class="fn">
+        <span class="sig">CascadedController.reset()</span>
+        <pre><code class="language-python">def reset(self) -> None:
+    self.integral_x = 0.0
+    self.integral_y = 0.0
+    self.filtered_e_vx = 0.0
+    self.filtered_e_vy = 0.0</code></pre>
+        <p>Zeroes the running state without rebuilding the whole object &mdash; useful when reusing one controller instance across repeated trials.</p>
+      </div>
+
+      <div class="fn">
+        <span class="sig">CascadedController.compute(state12, ref6) -&gt; [Z, L, M, N]</span>
+        <pre><code class="language-python">def compute(self, state12, ref6):
+    g = self.gains
+    px, py, pz = state12[0], state12[1], state12[2]
+    u, v, w = state12[3], state12[4], state12[5]
+    phi, theta, psi = state12[6], state12[7], state12[8]
+    p, q, r = state12[9], state12[10], state12[11]
+
+    R = rotation_body_to_earth(phi, theta, psi)
+    vx, vy, vz = R @ np.array([u, v, w])
+
+    e_x = ref6[0] - px
+    e_y = ref6[1] - py
+    e_z = ref6[2] - pz
+    e_vx = ref6[3] - vx
+    e_vy = ref6[4] - vy
+    e_vz = ref6[5] - vz
+
+    self.integral_x += e_x * self.dt
+    self.integral_y += e_y * self.dt
+    if self.integral_clamp is not None:
+        self.integral_x = np.clip(self.integral_x, -self.integral_clamp, self.integral_clamp)
+        self.integral_y = np.clip(self.integral_y, -self.integral_clamp, self.integral_clamp)
+
+    self.filtered_e_vx = (1 - self._alpha) * self.filtered_e_vx + self._alpha * e_vx
+    self.filtered_e_vy = (1 - self._alpha) * self.filtered_e_vy + self._alpha * e_vy
+
+    theta_c = g.k_px * e_x + g.k_ix * self.integral_x + g.k_dx * self.filtered_e_vx
+    phi_c = -(g.k_py * e_y + g.k_iy * self.integral_y + g.k_dy * self.filtered_e_vy)
+
+    Z = self.params.mass * self.params.g + g.k_pz * e_z + g.k_dz * e_vz
+
+    e_phi = phi_c - phi
+    e_theta = theta_c - theta
+    e_psi = 0.0 - psi
+    e_p = 0.0 - p
+    e_q = 0.0 - q
+    e_r = 0.0 - r
+
+    L = g.k_pphi * e_phi + g.k_dphi * e_p
+    M = g.k_ptheta * e_theta + g.k_dtheta * e_q
+    N = g.k_ppsi * e_psi + g.k_dpsi * e_r
+
+    return np.array([Z, L, M, N])</code></pre>
+        <p>This is the one function that runs every control step. Reading it top to bottom:</p>
+        <ol>
+          <li><strong>Unpack state, rotate velocity to earth frame</strong> &mdash; the plant stores body-frame <code>u,v,w</code> (&sect;04), but the position/velocity error has to be computed in the same (earth) frame as the reference.</li>
+          <li><strong>Six errors</strong> &mdash; position and velocity error on all three earth axes.</li>
+          <li><strong>Integrate and filter</strong> &mdash; the x/y position-error integral accumulates (optionally clamped), and the velocity error is run through a discrete low-pass filter before being used as the PID's derivative term (a standard way to avoid amplifying sensor noise in a "D" term).</li>
+          <li><strong>Outer loop &rarr; commanded tilt</strong> &mdash; <code>theta_c</code> and <code>phi_c</code> are literally a PID output, but instead of a force, that output <em>is</em> a commanded angle &mdash; this is the small-angle "tilt to translate" inversion from &sect;04, and note the sign flip on <code>phi_c</code>: tilting right (positive roll) accelerates the drone in the <em>negative</em> y direction under this axis convention, so the roll command has to carry a minus sign to correct a positive y error.</li>
+          <li><strong>Z &mdash; direct PD</strong>, no cascade needed since thrust already <em>is</em> the force, not an intermediate angle.</li>
+          <li><strong>Inner loop &rarr; torque</strong> &mdash; <code>L</code>, <code>M</code>, <code>N</code> are simple PD loops chasing the commanded angles (from step 4, or zero for yaw) and zero angular rate.</li>
+        </ol>
+        <p class="callout"><strong>A subtle, deliberately-kept inconsistency:</strong> the rate-error terms are written as <code>e_p&nbsp;=&nbsp;0&nbsp;-&nbsp;p</code>, then added with a <em>positive</em> sign (<code>+k_dphi*e_p</code>) &mdash; equivalent to <code>-k_dphi*p</code>. The report's own prose in Section&nbsp;5.1 describes this term with the opposite sign. Since the code, not the prose, is what actually produced the report's Fig.&nbsp;12/13, the code's convention is what's implemented here.</p>
+      </div>
+    </section>
+
+    <section id="step">
+      <div class="num-heading"><span class="n">09</span><h2>One simulation step, end to end</h2></div>
+      <p class="section-sub">Neither <code>CascadedController</code> nor <code>CrazyflieSim</code> runs a loop by itself &mdash; every script (a test, an animation) writes this same seven-line pattern.</p>
+      <pre><code class="language-python">controller = CascadedController(params=params, gains=gains, dt=dt, integral_clamp=0.5)
+sim = CrazyflieSim(params=params, x0=x0)
+
+for i in range(steps):
+    t = i * dt
+    ref6 = circle(t, radius=1.0, z=10.0, omega=0.125)   # &sect;07 &mdash; where is the target right now?
+    u4 = controller.compute(sim.state, ref6)             # &sect;08 &mdash; what should the motors do?
+    state = sim.step(u4, dt=dt)                            # &sect;06 &mdash; advance the physics by dt
+    log[i] = state                                          # keep it for plotting / analysis</code></pre>
+      <p>Everything in this document is downstream of this one loop, run 50,000 times for a 100-second flight at <code>dt=0.002s</code> (500&nbsp;Hz, matching the report's own control rate). Nothing here is specific to a circle or a hover &mdash; swap the <code>ref6</code> line for any function of <code>t</code> that returns a 6-vector and the rest is unchanged, which is exactly how <code>animate_flight_3d.py</code> (hover) and <code>animate_flight_3d_circle.py</code> (circle) share almost all of their code.</p>
+    </section>
+
+    <section id="stability">
+      <div class="num-heading"><span class="n">10</span><h2>Stability analysis</h2></div>
+      <p class="section-sub">A separate, purely linear cross-check that never touches the nonlinear simulator at all.</p>
+      <div class="file-card"><span class="path">src/stability_analysis.py</span><span class="desc">open-loop transfer functions and gain/phase margins for all 6 control loops</span></div>
+      <p>Everywhere else in this document, "the model" means the nonlinear ODE from &sect;04, stepped forward in time. This module is different: it builds classical Laplace-domain transfer functions for each loop (using the <code>control</code> package) and asks a purely linear-systems question &mdash; <em>if you nudge this loop slightly off its operating point, does the perturbation decay, and with how much margin?</em> &mdash; independent of ever running a time-domain simulation.</p>
+      <div class="fn">
+        <span class="sig">z_open_loop(params, gains)</span>
+        <pre><code class="language-python">def z_open_loop(params, gains):
+    """Eq. 14: Loz = (kdz*s + kpz)/(m*s^2) * 10/(s+10)."""
+    return (gains.k_dz * s + gains.k_pz) / (params.mass * s ** 2) * MOTOR_TF</code></pre>
+        <p>The altitude loop's open-loop transfer function: a PD controller, a double-integrator plant (force &rarr; acceleration &rarr; velocity &rarr; position, hence <code>1/s&sup2;</code>), and the motor lag from &sect;05 in series. <code>phi_inner_open_loop</code>, <code>theta_inner_open_loop</code>, and <code>psi_open_loop</code> are the same shape, one per axis, swapping in <code>Jxx</code>/<code>Jyy</code>/<code>Jzz</code> and that axis's gains.</p>
+      </div>
+      <div class="fn">
+        <span class="sig">phi_outer_open_loop(params, gains) &nbsp;/&nbsp; theta_outer_open_loop(params, gains)</span>
+        <pre><code class="language-python">def phi_outer_open_loop(params, gains):
+    inner = phi_inner_open_loop(params, gains)
+    closed_inner = control.feedback(inner, 1)
+    outer_pid = params.g * (gains.k_dy * s ** 2 + gains.k_py * s + gains.k_iy) / (
+        s * (1 + s / gains.N_filter)
+    )
+    return outer_pid * closed_inner / s</code></pre>
+        <p>The outer position loop, cascaded on top of the (now closed) inner attitude loop &mdash; <code>control.feedback(inner, 1)</code> closes the inner loop with unity feedback first, exactly like wrapping the inner PD in its own control loop before handing its output to the outer PID.</p>
+        <p class="callout warn"><strong>Found here:</strong> the report's own printed Eq.&nbsp;16/18 for this transfer function is missing a trailing <code>/s</code> that its own MATLAB code includes (<code>OLy = PID_tf*CLL/s</code>). Without it, the computed crossover frequency comes out roughly 4&times; too high and the gain margin comes out infinite instead of the reported ~7&nbsp;dB. With it (as coded above), all 6 loops match the report's stated margins almost exactly.</p>
+      </div>
+      <div class="fn">
+        <span class="sig">margins_db_deg(open_loop_tf) -&gt; (gain margin dB, phase margin deg, &hellip;)</span>
+        <pre><code class="language-python">def margins_db_deg(open_loop_tf):
+    gm, pm, wcg, wcp = control.margin(open_loop_tf)
+    gm_db = 20 * np.log10(gm) if np.isfinite(gm) and gm > 0 else None
+    return gm_db, pm, wcg, wcp</code></pre>
+        <p>A thin wrapper around <code>control.margin()</code>, converting the raw (linear) gain margin into decibels and returning <code>None</code> for the common case of an infinite margin (a loop that can't be destabilized just by turning the gain up or down).</p>
+      </div>
+      <div class="table-wrap"><table>
+        <tr><th>Loop</th><th>Gain margin</th><th>Phase margin</th><th>Crossover &omega;</th></tr>
+        <tr><td class="mono">Z</td><td class="mono">&infin;</td><td class="mono">46.0&deg;</td><td class="mono">5.46 rad/s</td></tr>
+        <tr><td class="mono">L inner</td><td class="mono">&infin;</td><td class="mono">46.7&deg;</td><td class="mono">6.23 rad/s</td></tr>
+        <tr><td class="mono">L outer</td><td class="mono">7.33 dB</td><td class="mono">53.3&deg;</td><td class="mono">6.82 rad/s</td></tr>
+        <tr><td class="mono">M inner</td><td class="mono">&infin;</td><td class="mono">46.0&deg;</td><td class="mono">7.33 rad/s</td></tr>
+        <tr><td class="mono">M outer</td><td class="mono">6.76 dB</td><td class="mono">56.3&deg;</td><td class="mono">7.64 rad/s</td></tr>
+        <tr><td class="mono">N</td><td class="mono">&infin;</td><td class="mono">50.8&deg;</td><td class="mono">5.38 rad/s</td></tr>
+      </table></div>
+      <p class="diagram-caption">Computed values, matching the report's Section&nbsp;6 to within its own rounding (3 significant figures).</p>
+    </section>
+
+    <section id="mixer">
+      <div class="num-heading"><span class="n">11</span><h2>Mixer (reference-only)</h2></div>
+      <p class="section-sub">Present for completeness; deliberately not wired into the simulation loop.</p>
+      <div class="file-card"><span class="path">src/mixer.py</span><span class="desc">[Z,L,M,N] &harr; per-motor squared speed, matching Eq. 20/22</span></div>
+      <pre><code class="language-python">MIXER = np.array([
+    [1.0, 1.0, 1.0, 1.0],
+    [-1.0, -1.0, 1.0, 1.0],
+    [-1.0, 1.0, -1.0, 1.0],
+    [1.0, -1.0, 1.0, -1.0],
+])
+
+MIXER_INV = 0.25 * np.array([
+    [1.0, -1.0, -1.0, 1.0],
+    [1.0, -1.0, 1.0, -1.0],
+    [1.0, 1.0, 1.0, 1.0],
+    [1.0, 1.0, -1.0, -1.0],
+])
+
+def forces_to_motor_speeds_squared(zlmn):
+    return MIXER_INV @ np.asarray(zlmn, dtype=float)</code></pre>
+      <p>The report's own closed-loop simulation (Listing&nbsp;4) feeds <code>[Z,L,M,N]</code> straight into the dynamics without ever going through a mixer &mdash; the mixer only shows up later, in Section&nbsp;9's firmware/hardware discussion, converting the same four numbers into four individual motor speeds for the real PWM outputs. That's why it's a standalone module here rather than a step inside <code>CrazyflieSim.step()</code>: it belongs to a different layer (motor allocation) than the plant (rigid-body physics).</p>
+    </section>
+
+    <section id="validation">
+      <div class="num-heading"><span class="n">12</span><h2>Validation &amp; tests</h2></div>
+      <p class="section-sub">21 tests, in two tiers, each answering a different kind of "is this right?"</p>
+      <div class="table-wrap"><table>
+        <tr><th>Question</th><th>How it's answered</th><th>File</th></tr>
+        <tr><td>Do the &Gamma; coefficients match a hand computation?</td><td>direct arithmetic comparison</td><td class="mono">tests/test_gammas.py</td></tr>
+        <tr><td>Does hover (Z=mg, no torque) stay perfectly still?</td><td>equilibrium check</td><td class="mono">tests/test_hover.py</td></tr>
+        <tr><td>Does &theta;=90&deg; actually blow up, as documented?</td><td>expected-singularity check</td><td class="mono">tests/test_singularity.py</td></tr>
+        <tr><td>Does free-fall follow the exact parabola?</td><td>closed-form solution match</td><td class="mono">validation_tests/test_closed_form.py</td></tr>
+        <tr><td>Is the RK4 integrator really 4th-order?</td><td>Richardson step-halving</td><td class="mono">validation_tests/test_convergence.py</td></tr>
+        <tr><td>Does torque-free spin conserve energy &amp; momentum?</td><td>physical invariant, ~1e-15 error</td><td class="mono">validation_tests/test_conservation.py</td></tr>
+        <tr><td>Does this RK4 agree with an independent solver?</td><td>vs. <code>scipy.integrate.solve_ivp</code></td><td class="mono">validation_tests/test_cross_validation.py</td></tr>
+        <tr><td>Does it stay finite under random inputs?</td><td>100 randomized episodes</td><td class="mono">validation_tests/test_fuzz.py</td></tr>
+        <tr><td>Do the 6 loops' margins match Section 6?</td><td>vs. the report's own numbers</td><td class="mono">validation_tests/test_stability_margins.py</td></tr>
+        <tr><td>Does closed-loop flight behave sensibly?</td><td>vs. reproduced Fig. 12/13 &amp; physical bounds</td><td class="mono">validation_tests/test_closed_loop_reproduction.py</td></tr>
+      </table></div>
+      <p>All of it runs with one command from the repo root: <code class="mono">python3 -m pytest uav_sim/tests/ uav_sim/validation_tests/ -v</code>.</p>
+    </section>
+
+    <section id="errata">
+      <div class="num-heading"><span class="n">13</span><h2>Report errata found along the way</h2></div>
+      <p class="section-sub">Seven places where the source report and this implementation deliberately part ways &mdash; each one found by testing, not by inspection, and each one logged in <code>CHANGELOG.md</code>.</p>
+      <div class="table-wrap"><table>
+        <tr><th>#</th><th>Where</th><th>What was wrong</th><th>Resolution</th></tr>
+        <tr><td class="mono">1</td><td>&sect;03, p.6</td><td>&Gamma;-denominator uses <code>Jx&middot;Jy</code>, should be <code>Jx&middot;Jz</code> (~76% numeric error)</td><td class="status-pass">corrected formula</td></tr>
+        <tr><td class="mono">2</td><td>&sect;11, Eq.20/22</td><td>Mixer matrix is singular; its printed "inverse" isn't one</td><td class="status-pass">transcribed as-is, unused</td></tr>
+        <tr><td class="mono">3</td><td>&sect;08, Table 1</td><td><code>k_pphi</code> "Simulation" value is a digit-transposition typo</td><td class="status-pass">computed from formula instead</td></tr>
+        <tr><td class="mono">4</td><td>&sect;08, &sect;5.1 prose</td><td>Rate-damping sign in the text disagrees with the code that made Fig. 12/13</td><td class="status-pass">followed the code</td></tr>
+        <tr><td class="mono">5</td><td>&sect;06, Listing 4</td><td>The report's own simulation silently omits the motor lag</td><td class="status-pass">documented; kept the lag in <code>CrazyflieSim</code></td></tr>
+        <tr><td class="mono">6</td><td>&sect;10, Eq.16/18</td><td>Printed outer-loop transfer function is missing a <code>/s</code> present in the code</td><td class="status-pass">followed the code</td></tr>
+        <tr><td class="mono">7</td><td>&sect;04, Eq. p.2</td><td>Translational EOM has no tilt-to-translate coupling at all</td><td class="status-pass">added standard gravity terms; outer gains redesigned</td></tr>
+      </table></div>
+      <p>#7 is the big one: it's not a rounding slip, it's a gap that made the report's own control design (Section&nbsp;5, "tilting produces translation") physically impossible in its own equations (confirmed: the report's own linearization has an all-zero row for exactly this coupling too, so the gap is systemic, not a one-line typo). Fixing it meant the report's own outer-loop gains &mdash; tuned against a plant that couldn't translate &mdash; had to be redesigned from scratch (<code>gains_pole_placement_outer</code>, &sect;08) rather than merely copied.</p>
+    </section>
+
+    <section id="running">
+      <div class="num-heading"><span class="n">14</span><h2>Running it</h2></div>
+      <p class="section-sub">Three commands cover almost everything in this document.</p>
+      <pre><code class="language-python"># from the repo root
+pip install -r uav_sim/requirements.txt
+
+# every test in both tiers
+python3 -m pytest uav_sim/tests/ uav_sim/validation_tests/ -v
+
+# a 100s, 2-lap, 1m-radius circle at z=10m, recorded to MP4
+python3 uav_sim/validation_tests/animate_flight_3d_circle.py</code></pre>
+    </section>
+
+    <footer>
+      Companion document for a code-structure walkthrough of <code class="mono">uav_sim/</code>, built on Ian Snider's "CrazyFlie 2.1 Cascaded PID/PD Control System" (WashU ESE 4481). Full history and every deviation from the source report: <code class="mono">uav_sim/CHANGELOG.md</code>.
+    </footer>
+  </main>
+</div>
+
+<script>
+  if (window.hljs) { hljs.highlightAll(); }
+</script>
