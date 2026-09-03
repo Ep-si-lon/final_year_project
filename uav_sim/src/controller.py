@@ -26,6 +26,24 @@ Listing 2's own code computes `e_p = 0 - p` then `L = k_pphi*e_phi +
 k_dphi*e_p` (i.e. `-k_dphi*p`), which is the OPPOSITE sign from Section
 5.1's prose ("L = ... + k_dphi*p_hat"). The code is what actually produced
 Fig. 12/13, so it's what's implemented here; see CHANGELOG.md.
+
+Outer-loop x/y gains: `ControllerGains` defaults to the report's own
+manually-tuned Table 1 values (k_px=k_py=0.2, k_ix=k_iy=0.1, k_dx=k_dy=0.1),
+kept for exact Fig. 12/13 reproduction. But those were tuned against
+dynamics.py's PRE-FIX translational equation (see dynamics.py's
+DEVIATION docstring), which had no tilt-to-translate coupling at all --
+they are not meaningful gains for the corrected physics (verified: they
+diverge for anything beyond a tiny disturbance once real translational
+coupling exists). Use `gains_pole_placement_outer` for a properly designed
+outer loop: the outer PID's own formula (k_p=wn^2/g, k_i=wn^3/g,
+k_d=2*zeta*wn/g) exactly cancels the corrected plant's g/s^2 relation
+(position from commanded tilt, assuming the much-faster inner attitude
+loop tracks near-perfectly), leaving closed-loop poles at
+s^3+2*zeta*wn*s^2+wn^2*s+wn^3=0 independent of g -- a clean, principled
+design. wn_outer=0.6 rad/s, zeta_outer=1.0 (5x below the inner loop's
+wn=3rad/s for valid cascade separation) is verified stable and accurate:
+a 1m step settles to <0.01% error by t=60s, and tracking a 1m-radius
+circle at omega=0.125rad/s (2 laps/100s) gives ~1-2% tracking error.
 """
 from dataclasses import dataclass
 
@@ -75,6 +93,27 @@ def gains_from_report_design_parameters(params: CrazyflieParams) -> ControllerGa
         k_ppsi=params.Jzz * wn_yaw ** 2,
         k_dpsi=params.Jzz * 2 * zeta_yaw * wn_yaw,
     )
+
+
+def gains_pole_placement_outer(
+    params: CrazyflieParams,
+    base: ControllerGains = None,
+    wn_outer: float = 0.6,
+    zeta_outer: float = 1.0,
+) -> ControllerGains:
+    """Replaces the outer x/y PID gains in `base` (default: the formula
+    gains from gains_from_report_design_parameters) with a proper
+    pole-placement design against the CORRECTED translational dynamics --
+    see this module's docstring. Only meaningful once dynamics.py's gravity
+    fix is applied; not a reproduction of anything in the report."""
+    import dataclasses
+
+    if base is None:
+        base = gains_from_report_design_parameters(params)
+    kp = wn_outer ** 2 / params.g
+    ki = wn_outer ** 3 / params.g
+    kd = 2 * zeta_outer * wn_outer / params.g
+    return dataclasses.replace(base, k_px=kp, k_ix=ki, k_dx=kd, k_py=kp, k_iy=ki, k_dy=kd)
 
 
 class CascadedController:

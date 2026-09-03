@@ -13,6 +13,26 @@ Input (4): [Z, L, M, N]
 
 theta = +-90 deg is a kinematic singularity (1/cos(theta) terms below) -- by
 design this is not handled, only documented (see tests/test_singularity.py).
+
+DEVIATION FROM THE PDF (see CHANGELOG.md): the report's own printed
+translational equation (p.2) is `(u_dot,v_dot,w_dot) = (rv-qw,pw-ru,qu-pv) +
+(0,0,(Z-mg)/m)` -- gravity subtracted only from the body-z component, with
+no rotation applied. That's the near-hover approximation of gravity
+(valid only for phi=theta=0), not the general nonlinear form, even though
+the report presents it as such: a real quadrotor equations-of-motion
+gravity vector must be rotated from earth frame into body frame via R^T,
+giving g_body = (g*sin(theta), -g*sin(phi)*cos(theta), -g*cos(phi)*cos(theta))
+(matches Eq. 8-11's own g*phi/g*theta trim relations and Section 5.1's
+"p_double_dot_y = g*phi" text -- neither of which the report's own printed
+Section-2 equation or Section-3 linearization actually implements: the
+printed A matrix's u_dot row (Eq. 5, p.3) is all zeros, meaning THEIR
+linearization has zero coupling from theta to translational accel either).
+Confirmed experimentally: without this fix, commanding a nonzero pitch/roll
+angle at rest produces literally zero horizontal acceleration -- the
+underactuated tilt-to-translate mechanism the controller's whole design
+depends on doesn't exist without it. Implemented here per the standard
+nonlinear body-frame EOM (matches every mainstream flight-dynamics text),
+not the report's literal near-hover-only text.
 """
 import numpy as np
 
@@ -47,11 +67,16 @@ def rigid_body_deriv(
     R = rotation_body_to_earth(phi, theta, psi)
     p_dot_earth = R @ np.array([u, v, w])
 
-    uvw_dot = np.array([r * v - q * w, p * w - r * u, q * u - p * v])
-    uvw_dot[2] += (Z - params.mass * params.g) / params.mass
-
     cphi, sphi = np.cos(phi), np.sin(phi)
     ctheta, ttheta = np.cos(theta), np.tan(theta)
+    stheta = np.sin(theta)
+
+    uvw_dot = np.array([
+        r * v - q * w + params.g * stheta,
+        p * w - r * u - params.g * sphi * ctheta,
+        q * u - p * v + Z / params.mass - params.g * cphi * ctheta,
+    ])
+
     euler_kinematics = np.array([
         [1.0, sphi * ttheta, cphi * ttheta],
         [0.0, cphi, -sphi],

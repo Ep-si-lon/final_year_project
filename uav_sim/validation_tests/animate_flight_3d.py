@@ -3,14 +3,19 @@ CrazyflieSim, hovering at pz=0.5m with the report's own small initial-tilt
 disturbance (matching reproduce_snider_figures.py's setup, extended from
 10s to 100s).
 
-Over 100s, Listing 2's controller as literally specified (no anti-windup)
-lets phi/theta diverge via integral windup once a steady-state position
-error persists (verified: reaches ~2 rad by t=100s) -- a real property of
-the report's own controller, not a bug (see controller.py's docstring). For
-a watchable long-duration flight, this script uses `integral_clamp=0.5`
-(matching the firmware's own anti-windup bound, Listing 6 p.28) so phi/theta
-stay bounded while the slow, roughly-linear px/py drift (matching Fig. 13's
-"unsuccessful control of the drift") is still clearly visible.
+Uses `gains_pole_placement_outer` for the x/y outer loop, NOT
+`ControllerGains`'s defaults (Table 1's manually-tuned 0.2/0.1/0.1) --
+those were tuned against dynamics.py's pre-fix translational equation
+(no tilt-to-translate coupling at all) and now diverge to NaN by t~40s
+once real coupling exists (verified). See dynamics.py's DEVIATION
+docstring, controller.py's docstring, and CHANGELOG.md.
+
+Also uses `integral_clamp=0.5` (matching the firmware's own anti-windup
+bound, Listing 6 p.28): Listing 2's controller as literally specified has
+no anti-windup, which over 100s lets phi/theta grow via integral windup
+whenever a steady-state error persists -- a real property of the report's
+own controller (see controller.py's docstring), independent of the
+dynamics fix.
 
 Not a pytest test -- run directly: `python3
 uav_sim/validation_tests/animate_flight_3d.py`. Needs matplotlib + ffmpeg
@@ -24,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from uav_sim.src.controller import CascadedController
+from uav_sim.src.controller import CascadedController, gains_pole_placement_outer
 from uav_sim.src.dynamics import rotation_body_to_earth
 from uav_sim.src.params import CrazyflieParams
 from uav_sim.src.plant import CrazyflieSim
@@ -40,7 +45,8 @@ ARM_LENGTH = 0.12   # visually exaggerated (real Crazyflie arm ~0.045m) for visi
 
 def simulate():
     params = CrazyflieParams()
-    controller = CascadedController(params=params, dt=DT, integral_clamp=0.5)
+    gains = gains_pole_placement_outer(params)
+    controller = CascadedController(params=params, gains=gains, dt=DT, integral_clamp=0.5)
     sim = CrazyflieSim(params=params, x0=X0.copy())
     log = np.zeros((STEPS + 1, 12))
     log[0] = sim.state

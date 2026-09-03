@@ -1,5 +1,61 @@
 # Changelog
 
+## 2026-09-03 — Fixed missing tilt-to-translate physics; redesigned outer-loop gains
+
+Attempting a circle trajectory (radius=1m, z=10m) surfaced a fundamental
+gap, not a tuning problem: the report's own printed translational EOM
+(p.2) is `(u_dot,v_dot,w_dot) = (rv-qw,pw-ru,qu-pv) + (0,0,(Z-mg)/m)` --
+gravity subtracted only from the body-z component, with no rotation
+applied. That's the near-hover approximation (valid only at phi=theta=0),
+presented as if it were the general nonlinear equation. Verified
+experimentally: commanding and holding a 14 deg pitch tilt at rest produced
+**exactly zero** horizontal acceleration -- tilt-to-translate, the entire
+mechanism the controller's own design depends on (`p_double_dot_y=g*phi`,
+stated explicitly in Section 5.1's text), doesn't exist in the report's own
+equations. Cross-checked: the report's own printed linearization (Eq. 5,
+p.3) has an all-zero row for u_dot too -- so Section 3's linearization,
+Section 5's control design, and Section 6's stability analysis are all
+self-consistent with each other, but built on dynamics that can't actually
+translate via tilt. This also recasts the earlier "successful reproduction"
+of Fig. 13's px/py drift: that drift was real (bit-for-bit same equations)
+but driven by a secondary numerical artifact (residual rate/velocity
+cross-terms during integral windup), not genuine tilt-driven translation --
+because that mechanism was absent from both the report's model and ours.
+
+**Fix** (`dynamics.py`): added the standard gravity-distribution terms
+(rotating gravity from earth frame into body frame via R^T): `u_dot += g*
+sin(theta)`, `v_dot += -g*sin(phi)*cos(theta)`, `w_dot` uses `-g*cos(phi)*
+cos(theta)` instead of bare `-g`. Matches every mainstream flight-dynamics
+text; not reproduced from the PDF (which lacks it).
+
+**Consequence**: Table 1's manually-tuned outer x/y gains (k_px=k_py=0.2,
+k_ix=k_iy=0.1, k_dx=k_dy=0.1 -- `ControllerGains`'s defaults, kept for
+historical/Fig.-12 compatibility) were tuned against the old,
+non-translating dynamics and are now **unstable**: verified diverging to
+NaN by t~40s for the same 100s hover+small-disturbance scenario that
+previously "worked" (i.e. drifted, per the old bug). Added
+`gains_pole_placement_outer` (`controller.py`): the outer PID's own formula
+(`k_p=wn^2/g, k_i=wn^3/g, k_d=2*zeta*wn/g`) exactly cancels the
+now-correct plant's `g/s^2` relation (position from commanded tilt, given
+the much-faster inner attitude loop), leaving closed-loop poles at
+`s^3+2*zeta*wn*s^2+wn^2*s+wn^3=0`, independent of g -- a clean,
+principled design. `wn_outer=0.6 rad/s, zeta_outer=1.0` (5x below the
+inner loop's `wn=3rad/s`, needed for valid cascade separation) is verified
+stable and accurate: a 1m step settles to <0.01% error by t=60s; tracking a
+1m-radius circle at z=10m needs `omega` well below the outer loop's own
+bandwidth (not just under the small-angle tilt limit -- `omega=0.5rad/s`,
+comfortably small-angle, still gave ~65% tracking error since it exceeds
+the loop's own bandwidth) -- `omega=0.125rad/s` (2 laps/100s) gives ~1-2%
+tracking error.
+
+Updated `reproduce_snider_figures.py`/`test_closed_loop_reproduction.py`
+and `animate_flight_3d.py` to use `gains_pole_placement_outer` +
+`integral_clamp=0.5`; they now correctly show bounded station-keeping
+(settling back near the origin) for the small-disturbance hover scenario,
+not Fig. 13's drift. Added `animate_flight_3d_circle.py`: a 100s, 2-lap,
+1m-radius circle at z=10m, ~1-2% tracking error, `plots/
+flight_animation_circle_100s.mp4`.
+
 ## 2026-09-03 — 100s 3D flight animation + integral anti-windup option
 
 Added `uav_sim/validation_tests/animate_flight_3d.py`: a 3D animation of a

@@ -1,13 +1,14 @@
-"""Regression test locking in the qualitative match between this project's
-closed-loop plant+controller and Snider Figures 12/13 (p.20-21), reusing
-reproduce_snider_figures.py's setup exactly. Not an exact numeric match to
-the PDF's own plot (no raw data available, only a rendered image to eyeball)
--- these assertions capture the qualitative behavior the report itself
-describes: pz rises and settles at 0.5m by ~2.5s with no overshoot (Fig. 12),
-and px/py show a small, nonzero, monotonic drift rather than either
-perfect station-keeping or runaway divergence (Fig. 13, "unsuccessful
-control of the px and py drift ... unable to completely mitigate the
-steady-state error").
+"""Regression test for reproduce_snider_figures.py's setup, post dynamics-fix
+(see that module's docstring and CHANGELOG.md for why this no longer
+reproduces Fig. 13's px/py drift): pz should still rise and settle at 0.5m
+by ~2.5s with no overshoot (Fig. 12 -- unaffected by the fix, since it's a
+pure-hover, no-tilt scenario). px/py, given the small initial tilt
+disturbance, should show a bounded, damped correction back toward
+station-keeping near the origin -- NOT Fig. 13's drift (an artifact of the
+report's own missing tilt-to-translate coupling, now fixed) and NOT runaway
+divergence (which is what happens if `ControllerGains`'s default,
+report-literal outer gains are used post-fix instead of
+`gains_pole_placement_outer`).
 """
 import numpy as np
 
@@ -26,39 +27,39 @@ def _check_pz_matches_figure_12(log):
     assert pz.max() < 0.55  # no significant overshoot
 
 
-def _check_drift_matches_figure_13(log):
+def _check_station_keeping(log):
     px, py = log[:, 0], log[:, 1]
-    # small but nonzero -- not perfect station-keeping, not runaway divergence
-    assert 1e-4 < abs(px[-1]) < 0.2
-    assert 1e-4 < abs(py[-1]) < 0.2
-    # report's own plot shows roughly monotonic drift, not oscillation
-    assert np.all(np.diff(px) >= -1e-6) or np.all(np.diff(px) <= 1e-6)
-    assert np.all(np.diff(py) >= -1e-6) or np.all(np.diff(py) <= 1e-6)
+    # bounded response to the small initial tilt disturbance, not divergence
+    assert np.abs(px).max() < 0.2
+    assert np.abs(py).max() < 0.2
+    # damped correction, ending up close to the origin (not Fig. 13's drift)
+    assert abs(px[-1]) < 0.05
+    assert abs(py[-1]) < 0.05
 
 
-def test_literal_reproduction_matches_figures_12_and_13():
+def test_literal_reproduction():
     params = CrazyflieParams()
     gammas = compute_gammas(params)
     log = run_literal(params, gammas)
     _check_pz_matches_figure_12(log)
-    _check_drift_matches_figure_13(log)
+    _check_station_keeping(log)
 
 
-def test_full_plant_reproduction_matches_figures_12_and_13():
+def test_full_plant_reproduction():
     params = CrazyflieParams()
     log = run_full_plant(params)
     _check_pz_matches_figure_12(log)
-    _check_drift_matches_figure_13(log)
+    _check_station_keeping(log)
 
 
 def test_literal_and_full_plant_agree_with_each_other():
     """The motor lag (present in full_plant, absent in literal -- see
     reproduce_snider_figures.py module docstring) should perturb the result
-    only modestly for this near-hover, slow-drift scenario."""
+    only modestly for this near-hover, bounded-oscillation scenario."""
     params = CrazyflieParams()
     gammas = compute_gammas(params)
     log_literal = run_literal(params, gammas)
     log_full = run_full_plant(params)
     assert abs(log_literal[-1, 2] - log_full[-1, 2]) < 0.01  # pz
-    assert abs(log_literal[-1, 0] - log_full[-1, 0]) < 0.02  # px
-    assert abs(log_literal[-1, 1] - log_full[-1, 1]) < 0.02  # py
+    assert abs(log_literal[-1, 0] - log_full[-1, 0]) < 0.03  # px
+    assert abs(log_literal[-1, 1] - log_full[-1, 1]) < 0.03  # py

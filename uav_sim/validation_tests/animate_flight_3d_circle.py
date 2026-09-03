@@ -1,13 +1,23 @@
 """3D animation of a closed-loop flight tracking a circular reference
-trajectory: radius=1m, altitude z=10m, angular rate omega=0.5 rad/s
-(~12.6s/lap, ~8 laps over the 100s run). Mirrors animate_flight_3d.py's
+trajectory: radius=1m, altitude z=10m, angular rate omega=0.125 rad/s
+(~50.3s/lap, 2 laps over the 100s run). Mirrors animate_flight_3d.py's
 structure but swaps the fixed hover setpoint for src/reference.circle().
 
-omega=0.5 keeps the required centripetal tilt small (~1.5deg for radius=1m,
-tilt ~= omega^2*radius/g) so the tracking stays within the controller's
-small-angle design assumption (Section 5.3's "sin(phi)~=phi" trim relation).
-Starts the drone already at the circle's t=0 point (radius,0,z) at rest, so
-the only transient is spinning up to the commanded tangential velocity.
+IMPORTANT: this requires two fixes beyond the original hover demo, both
+documented in dynamics.py/controller.py/CHANGELOG.md:
+1. dynamics.py's translational EOM needed the standard gravity-distribution
+   terms added (the report's own printed equation has no tilt-to-translate
+   coupling at all -- verified experimentally, not a tuning issue).
+2. The outer x/y gains use `gains_pole_placement_outer` (wn=0.6rad/s,
+   zeta=1.0), NOT the report's own Table 1 manually-tuned values (0.2/0.1/
+   0.1) -- those were tuned against the pre-fix (non-translating) dynamics
+   and diverge once real tilt-to-translate coupling exists.
+
+omega=0.125 is comfortably below the outer loop's own wn=0.6rad/s bandwidth
+(good tracking needs the trajectory frequency well under the control
+bandwidth, not just under the small-angle tilt limit) -- verified: ~1-2%
+tracking error. Starts the drone already at the circle's t=0 point
+(radius,0,z) at rest, so the only transient is spinning up to speed.
 
 Not a pytest test -- run directly: `python3
 uav_sim/validation_tests/animate_flight_3d_circle.py`. Needs matplotlib +
@@ -21,7 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 import numpy as np
 
-from uav_sim.src.controller import CascadedController
+from uav_sim.src.controller import CascadedController, gains_pole_placement_outer
 from uav_sim.src.params import CrazyflieParams
 from uav_sim.src.plant import CrazyflieSim
 from uav_sim.src.reference import circle
@@ -29,7 +39,7 @@ from uav_sim.validation_tests.animate_flight_3d import quad_arm_points
 
 RADIUS = 1.0
 Z = 10.0
-OMEGA = 0.5
+OMEGA = 0.125
 DT = 0.002
 T = 100.0
 STEPS = int(T / DT)
@@ -39,7 +49,8 @@ ARM_LENGTH = 0.18
 
 def simulate():
     params = CrazyflieParams()
-    controller = CascadedController(params=params, dt=DT, integral_clamp=0.5)
+    gains = gains_pole_placement_outer(params)
+    controller = CascadedController(params=params, gains=gains, dt=DT, integral_clamp=0.5)
     x0 = np.array([RADIUS, 0, Z, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=float)
     sim = CrazyflieSim(params=params, x0=x0)
     log = np.zeros((STEPS + 1, 12))
